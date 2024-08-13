@@ -1268,31 +1268,12 @@ SK_HatsuneMiku_BeginFrame (void)
   static uint32_t* puiGameLimit =
         (uint32_t *)((uintptr_t)SK_Debug_GetImageBaseAddr () + 0x14ABBB8);
 
-  // Pointer at DivaMegaMix.exe, Offset=780h
-  // 1.00: 0x114EFF8
-  // 1.01: 0x1148FC8
-  // 1.02, 1.03: 0x11481E8
-  static auto menu_flag_addr =
-      *(uintptr_t *)((uintptr_t)SK_Debug_GetImageBaseAddr () + 0x11481E8) + 0x780;
-
-  // Menu is Active, 60 FPS (or lower) framerate cap is required
-  if ((*(uint8_t *)menu_flag_addr) & 0x1)
-  {
-    __target_fps =
-      std::min ( 60.0f,  config.render.framerate.target_fps <= 0.0f ?
-                 60.0f : config.render.framerate.target_fps );
-
-    *puiGameLimit = 60;
-  }
-
   // Gameplay: Game needs no cap
-  else
-  {
-    __target_fps =
-      config.render.framerate.target_fps;
+  __target_fps =
+    config.render.framerate.target_fps;
 
-    *puiGameLimit = 0;
-  }
+  *puiGameLimit = 0;
+  
 }
 #endif
 
