@@ -150,6 +150,34 @@ struct sk_config_t
         SK_PerfFreqInTsc = SK_QpcFreqInTsc;
     }
 
+    // Determine number of CPU cores total, and then the subset of those
+    //   cores that the process is allowed to run threads on.
+    SYSTEM_INFO        si = { };
+    SK_GetSystemInfo (&si);
+
+    DWORD     cpu_pop          = std::max (1UL, si.dwNumberOfProcessors);
+    DWORD_PTR process_affinity = 0,
+              system_affinity  = 0;
+
+    if (GetProcessAffinityMask (GetCurrentProcess (), &process_affinity,
+                                                       &system_affinity))
+    {
+      cpu_pop = 0;
+
+      for ( auto i = 0 ; i < 64 ; ++i )
+      {
+        if ((process_affinity >> i) & 0x1)
+          ++cpu_pop;
+      }
+    }
+
+    priority.available_cpu_cores =
+      std::max (1UL, std::min (cpu_pop, si.dwNumberOfProcessors));
+
+    screenshots.avif.max_threads =
+      std::max (2UL, priority.available_cpu_cores / 3);
+
+
     ZeroMemory (cpuid, sizeof (int) * 4);
 
 #ifndef SK_BUILT_BY_CLANG
@@ -159,7 +187,6 @@ struct sk_config_t
                                 cpuid [1], cpuid [2]);
 #endif
 
-    
 
     // MWAITX = ECX Bit 29 (8000_0001h)
     SK_CPU_HasMWAITX = (cpuid [2] & (1 << 28)) != 0;
@@ -513,6 +540,7 @@ struct sk_config_t
   struct screenshots_s {
     bool         use_avif              = false;
     bool         use_hdr_png           = false;
+    bool         use_jxl               = false;
     bool         png_compress          =  true;
     bool         show_osd_by_default   =  true;
     bool         play_sound            =  true;
@@ -527,7 +555,7 @@ struct sk_config_t
       int        yuv_subsampling       =   444;
       bool       full_range            =  true;
       int        compression_speed     =     8;
-      int        max_threads           =     6;
+      int        max_threads           =     5;
     } avif;
 
     int          compression_quality   =    90;
@@ -837,6 +865,7 @@ struct sk_config_t
       bool enable_32bpc                = false;
       bool remaster_8bpc_as_unorm      = false;
       bool remaster_subnative_as_unorm = false;
+      int  last_used_colorspace        = 0;
     } hdr;
   } render;
 
@@ -1293,6 +1322,7 @@ struct sk_config_t
     bool    highest_priority    = false;
     bool    deny_foreign_change =  true;
     int     minimum_render_prio = THREAD_PRIORITY_ABOVE_NORMAL;
+    DWORD   available_cpu_cores =   1UL;
   } priority;
 
   struct skif_s {
@@ -1540,8 +1570,9 @@ enum class SK_GAME_ID
   Fallout4,                     // Fallout4.exe
   DisgaeaPC,                    // dis1_st.exe
   SecretOfMana,                 // Secret_of_Mana.exe
-  FinalFantasyXV,               // ffxv*.exe
+  FinalFantasyXV,               // ffxv_*.exe
   FinalFantasyXIV,              // ffxiv_dx11.exe
+  FinalFantasyXVI,              // ffxvi_*.exe
   DragonBallFighterZ,           // DBFighterZ.exe
   NiNoKuni2,                    // Nino2.exe
   FarCry5,                      // FarCry5.exe

@@ -1065,166 +1065,6 @@ SK_D3D11_UnRegisterHUDShader ( uint32_t         bytecode_crc32c,
     );
 }
 
-struct ParamsPQ
-{
-  DirectX::XMVECTOR N, M;
-  DirectX::XMVECTOR C1, C2, C3;
-};
-
-static const ParamsPQ PQ =
-{
-  DirectX::XMVectorReplicate (2610.0 / 4096.0 / 4.0),   // N
-  DirectX::XMVectorReplicate (2523.0 / 4096.0 * 128.0), // M
-  DirectX::XMVectorReplicate (3424.0 / 4096.0),         // C1
-  DirectX::XMVectorReplicate (2413.0 / 4096.0 * 32.0),  // C2
-  DirectX::XMVectorReplicate (2392.0 / 4096.0 * 32.0),  // C3
-};
-
-static const DirectX::XMMATRIX c_fromXYZtoLMS = // Transposed
-{
-    0.3592f, -0.1922f, 0.0070f, 0.0f,
-    0.6976f,  1.1004f, 0.0749f, 0.0f,
-   -0.0358f,  0.0755f, 0.8434f, 0.0f,
-    0.0f,     0.0f,    0.0f,    1.0f
-};
-
-static const DirectX::XMMATRIX c_fromLMStoXYZ = // Transposed
-{
-   2.070180056695613509600f,  0.364988250032657479740f, -0.049595542238932107896f, 0.0f,
-  -1.326456876103021025500f,  0.680467362852235141020f, -0.049421161186757487412f, 0.0f,
-   0.206616006847855170810f, -0.045421753075853231409f,  1.187995941732803439400f, 0.0f,
-   0.0f,                      0.0f,                      0.0f,                     1.0f
-};
-
-static const DirectX::XMMATRIX c_from709toXYZ = // Transposed
-{
-  0.4123907983303070068359375f,  0.2126390039920806884765625f,   0.0193308182060718536376953125f, 0.0f,
-  0.3575843274593353271484375f,  0.715168654918670654296875f,    0.119194783270359039306640625f,  0.0f,
-  0.18048079311847686767578125f, 0.072192318737506866455078125f, 0.950532138347625732421875f,     0.0f,
-  0.0f,                          0.0f,                           0.0f,                            1.0f
-};
-
-static const DirectX::XMMATRIX c_fromXYZto709 = // Transposed
-{
-   3.2409698963165283203125f,    -0.96924364566802978515625f,       0.055630080401897430419921875f, 0.0f,
-  -1.53738319873809814453125f,    1.875967502593994140625f,        -0.2039769589900970458984375f,   0.0f,
-  -0.4986107647418975830078125f,  0.0415550582110881805419921875f,  1.05697154998779296875f,        0.0f,
-   0.0f,                          0.0f,                             0.0f,                           1.0f
-};
-
-static const DirectX::XMVECTOR g_MaxPQValue =
-  DirectX::XMVectorReplicate (125.0f);
-
-auto XMVectorSign = [](DirectX::XMVECTOR v)
-{
-using namespace DirectX;
-
-  XMVECTOR Control = XMVectorLess   (v, g_XMZero);
-  XMVECTOR Sign    = XMVectorSelect (g_XMOne, g_XMNegativeOne, Control);
-
-  return Sign;
-};
-
-auto PQToLinear = [](DirectX::XMVECTOR N, DirectX::XMVECTOR maxPQValue = g_MaxPQValue)
-{
-using namespace DirectX;
-
-  XMVECTOR ret;
-  XMVECTOR sign_N = XMVectorSign (N);
-
-  ret =
-    XMVectorPow (XMVectorAbs (N), XMVectorDivide (g_XMOne, PQ.M));
-
-  XMVECTOR nd;
-
-  nd =
-    XMVectorDivide (
-      XMVectorMax (XMVectorSubtract (ret, PQ.C1), g_XMZero),
-                   XMVectorSubtract (     PQ.C2,
-            XMVectorMultiply (PQ.C3, ret)));
-
-  ret =
-    XMVectorMultiply (sign_N, XMVectorMultiply (XMVectorPow (XMVectorAbs (nd), XMVectorDivide (g_XMOne, PQ.N)), maxPQValue));
-
-  return ret;
-};
-
-auto LinearToPQ = [](DirectX::XMVECTOR N, DirectX::XMVECTOR maxPQValue = g_MaxPQValue)
-{
-  using namespace DirectX;
-
-  XMVECTOR ret;
-
-  ret =
-    XMVectorMultiply (XMVectorSign (XMVectorDivide (N, maxPQValue)), XMVectorPow (XMVectorAbs (XMVectorDivide (N, maxPQValue)), PQ.N));
-
-  XMVECTOR nd =
-    XMVectorDivide (
-       XMVectorAdd (  PQ.C1, XMVectorMultiply (PQ.C2, ret)),
-       XMVectorAdd (g_XMOne, XMVectorMultiply (PQ.C3, ret))
-    );
-
-  return
-    XMVectorMultiply (XMVectorSign (nd), XMVectorPow (XMVectorAbs (nd), PQ.M));
-};
-
-float LinearToPQY (float N)
-{
-  const float fScaledN =
-    fabs (N * 0.008f); // 0.008 = 1/125.0
-
-  float ret =
-    pow (fScaledN, 0.1593017578125f);
-
-  float nd =
-    fabs ( (0.8359375f + (18.8515625f * ret)) /
-           (1.0f       + (18.6875f    * ret)) );
-
-  return
-    pow (nd, 78.84375f);
-};
-
-DirectX::XMVECTOR Rec709toICtCp (DirectX::XMVECTOR N)
-{
-  using namespace DirectX;
-
-  static const DirectX::XMMATRIX ConvMat = // Transposed
-  {
-    0.5000f,  1.6137f,  4.3780f, 0.0f,
-    0.5000f, -3.3234f, -4.2455f, 0.0f,
-    0.0000f,  1.7097f, -0.1325f, 0.0f,
-    0.0f,     0.0f,     0.0f,    1.0f
-  };
-
-  return
-    XMVector3Transform (
-      LinearToPQ (
-        XMVector3Transform (
-        XMVector3Transform (N, c_from709toXYZ), c_fromXYZtoLMS)
-                 ), ConvMat
-    );
-};
-
-DirectX::XMVECTOR ICtCptoRec709 (DirectX::XMVECTOR N)
-{
-  using namespace DirectX;
-
-  static const DirectX::XMMATRIX ConvMat = // Transposed
-  {
-    1.0f,                  1.0f,                  1.0f,                 0.0f,
-    0.00860514569398152f, -0.00860514569398152f,  0.56004885956263900f, 0.0f,
-    0.11103560447547328f, -0.11103560447547328f, -0.32063747023212210f, 0.0f,
-    0.0f,                  0.0f,                  0.0f,                 1.0f
-  };
-
-  return
-    XMVector3Transform (
-    XMVector3Transform (
-      PQToLinear (XMVector3Transform (N, ConvMat)),
-        c_fromLMStoXYZ ),
-        c_fromXYZto709 );
-};
-
 bool
 SK_D3D11_CaptureScreenshot  ( SK_ScreenshotStage when =
                               SK_ScreenshotStage::EndOfFrame,
@@ -1294,6 +1134,15 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                                     bool               wait,
                                     bool               purge)
 {
+  static std::atomic_int run_count = 0;
+
+  if (stage_ != SK_ScreenshotStage::_FlushQueue)
+    ++run_count;
+
+  else if (run_count == 0)
+    return;
+
+
   const SK_RenderBackend& rb =
     SK_GetCurrentRenderBackend ();
 
@@ -1564,14 +1413,6 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                    0.0f,                 0.0f,                  0.0f,                1.0f
                 };
 
-                static const XMMATRIX c_from709to2020 = // Transposed
-                {
-                  0.627225305694944f,  0.0690418812810714f, 0.0163911702607078f, 0.0f,
-                  0.329476882715808f,  0.919605681354755f,  0.0880887513437058f, 0.0f,
-                  0.0432978115892484f, 0.0113524373641739f, 0.895520078395586f,  0.0f,
-                  0.0f,                0.0f,                0.0f,                1.0f
-                };
-
                 HRESULT hr = S_OK;
 
                 if ( un_srgb.GetImageCount () == 1 &&
@@ -1599,10 +1440,10 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                 if ( un_srgb.GetImageCount () == 1 &&
                      hdr )
                 {
-                  XMVECTOR maxLum = XMVectorZero          (),
-                           minLum = XMVectorSplatInfinity (),
-                           maxCLL = XMVectorZero          (),
-                           maxRGB = XMVectorZero          ();
+                  float    maxLum = 0.0f,
+                           minLum = 5240320.0f;
+                  XMVECTOR maxCLL = XMVectorZero (),
+                           maxRGB = XMVectorZero ();
 
                   static const XMVECTORF32 s_luminance =
                     { 0.2126729f, 0.7151522f, 0.0721750f, 0.f };
@@ -1629,18 +1470,22 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                         v =
                           XMVector3Transform (v, c_from709toXYZ);
 
+                        const float fLum =
+                          XMVectorGetY (v);
+
                         maxLum =
-                          XMVectorReplicate (XMVectorGetY (XMVectorMax (v, maxLum)));
+                          std::max (fLum, maxLum);
 
                         minLum =
-                          XMVectorReplicate (XMVectorGetY (XMVectorMin (v, minLum)));
+                          std::min (fLum, minLum);
 
                         logLumTotal +=
                           log2 ( std::max (0.000001, static_cast <double> (std::max (0.0f, XMVectorGetY (v)))) );
                            lumTotal +=               static_cast <double> (std::max (0.0f, XMVectorGetY (v)));
                         ++N;
 
-                        v = XMVectorMax (g_XMZero, v);
+                        v =
+                          XMVectorMax (g_XMZero, v);
 
                         maxRGB =
                           XMVectorMax (v, maxRGB);
@@ -1655,30 +1500,21 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                       std::max ({ XMVectorGetX (maxCLL), XMVectorGetY (maxCLL), XMVectorGetZ (maxCLL) })
                     );
 
-                  SK_LOGi0 ( L"Min Luminance: %f, Max Luminance: %f", std::max (0.0f, XMVectorGetY (minLum)) * 80.0f,
-                                                                                      XMVectorGetY (maxLum)  * 80.0f );
+                  SK_LOGi0 ( L"Min Luminance: %f, Max Luminance: %f", std::max (0.0f, minLum) * 80.0f,
+                                                                                      maxLum  * 80.0f );
 
                   SK_LOGi0 ( L"Mean Luminance (arithmetic, geometric): %f, %f", 80.0 *      ( lumTotal    / N ),
                                                                                 80.0 * exp2 ( logLumTotal / N ) );
 
-                  pFrameData->hdr.max_cll_nits =                      80.0f * XMVectorGetX (maxCLL);
-                  pFrameData->hdr.avg_cll_nits = static_cast <float> (80.0 * ( lumTotal / N ));
+                  auto        luminance_freq = std::make_unique <uint32_t []> (65536);
+                  ZeroMemory (luminance_freq.get (),     sizeof (uint32_t)  *  65536);
 
-                  // After tonemapping, re-normalize the image to preserve peak white,
-                  //   this is important in cases where the maximum luminance was < 1000 nits
-                  XMVECTOR maxTonemappedRGB = g_XMZero;
+                  // 0 nits - 10k nits (appropriate for screencap, but not HDR photography)
+                  minLum = std::clamp (minLum, 0.0f,   125.0f);
+                  maxLum = std::clamp (maxLum, minLum, 125.0f);
 
-                  // User's display is the canonical mastering display, anything that would have clipped
-                  //   on their display should be clipped in the tonemapped SDR image.
-                  float _maxNitsToTonemap = rb.displays [rb.active_display].gamut.maxLocalY / 80.0f;
-
-                  static unsigned int luminance_freq [100000];
-
-                  ZeroMemory (luminance_freq, sizeof (unsigned int) * 100000);
-
-                  float fLumRange =
-                    XMVectorGetY (maxLum) -
-                    XMVectorGetY (minLum);
+                  const float fLumRange =
+                           (maxLum - minLum);
 
                   EvaluateImage ( un_srgb.GetImages     (),
                                   un_srgb.GetImageCount (),
@@ -1694,96 +1530,68 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                       v =
                         XMVector3Transform (v, c_from709toXYZ);
 
-                      luminance_freq [std::clamp ((int)std::roundf ((XMVectorGetY (v) - XMVectorGetY (minLum)) / (fLumRange / 100000.0f)), 0, 99999)]++;
+                      luminance_freq [
+                        std::clamp ( (int)
+                          std::roundf (
+                            (XMVectorGetY (v) - minLum)     /
+                                                 (fLumRange / 65536.0f) ),
+                                                           0, 65535 ) ]++;
                     }
                   });
 
-                  double percent = 0.0;
+                        double percent  = 100.0;
+                  const double img_size = (double)un_srgb.GetMetadata ().width *
+                                          (double)un_srgb.GetMetadata ().height;
 
-                  for (auto i = 0 ; i < 100000; ++i)
+                  for (auto i = 65535; i >= 0; --i)
                   {
-                    percent +=
-                      (100.0 * ((double)luminance_freq [i] / ((double)un_srgb.GetMetadata ().width * (double)un_srgb.GetMetadata ().height)));
+                    percent -=
+                      100.0 * ((double)luminance_freq [i] / img_size);
 
-                    if (percent >= 99.0)
+                    if (percent <= 99.975)
                     {
                       maxLum =
-                        XMVectorReplicate (XMVectorGetY (minLum) + (fLumRange * ((float)i / 100000.0f)));
+                        minLum + (fLumRange * ((float)i / 65536.0f));
 
                       break;
                     }
                   }
+
+                  pFrameData->hdr.max_cll_nits =                      80.0f * maxLum;
+                  pFrameData->hdr.avg_cll_nits = static_cast <float> (80.0  * ( lumTotal / N ));
+
+                  // After tonemapping, re-normalize the image to preserve peak white,
+                  //   this is important in cases where the maximum luminance was < 1000 nits
+                  XMVECTOR maxTonemappedRGB = g_XMZero;
+
+                  // User's display is the canonical mastering display, anything that would have clipped
+                  //   on their display should be clipped in the tonemapped SDR image.
+                  float _maxNitsToTonemap = rb.displays [rb.active_display].gamut.maxLocalY / 80.0f;
 
                   const float SDR_YInPQ =
                     LinearToPQY (1.5f);
 
                   const float  maxYInPQ =
                     std::max (SDR_YInPQ,
-                      LinearToPQY (std::min (_maxNitsToTonemap, XMVectorGetY (maxLum)))
+                      LinearToPQY (std::min (_maxNitsToTonemap, maxLum))
                     );
 
-                  hr =               un_srgb.GetImageCount () == 1 ?
-                    TransformImage ( un_srgb.GetImages     (),
-                                     un_srgb.GetImageCount (),
-                                     un_srgb.GetMetadata   (),
-                    [&](XMVECTOR* outPixels, const XMVECTOR* inPixels, size_t width, size_t y)
-                    {
-                      UNREFERENCED_PARAMETER(y);
+                  static std::vector <parallel_tonemap_job_s> parallel_jobs   (config.screenshots.avif.max_threads);
+                  static std::vector <HANDLE>                 parallel_start  (config.screenshots.avif.max_threads);
+                  static std::vector <HANDLE>                 parallel_finish (config.screenshots.avif.max_threads);
+                         std::vector <XMVECTOR>               parallel_pixels (un_srgb.GetMetadata ().width *
+                                                                               un_srgb.GetMetadata ().height);
 
-                      auto TonemapHDR = [](float L, float Lc, float Ld) -> float
-                      {
-                        float a = (  Ld / pow (Lc, 2.0f));
-                        float b = (1.0f / Ld);
-                      
-                        return
-                          L * (1 + a * L) / (1 + b * L);
-                      };
+                  SK_Image_InitializeTonemap   (         parallel_jobs, parallel_start,      parallel_finish);
+                  SK_Image_EnqueueTonemapTask  (un_srgb, parallel_jobs, parallel_pixels, maxYInPQ, SDR_YInPQ);
+                  SK_Image_DispatchTonemapJobs (         parallel_jobs);
+                  SK_Image_GetTonemappedPixels (final_sdr, un_srgb,     parallel_pixels,     parallel_finish);
 
-                      for (size_t j = 0; j < width; ++j)
-                      {
-                        XMVECTOR value = inPixels [j];
-
-                        XMVECTOR ICtCp =
-                          Rec709toICtCp (value);
-
-                        float Y_in  = std::max (XMVectorGetX (ICtCp), 0.0f);
-                        float Y_out = 1.0f;
-
-                        Y_out =
-                          TonemapHDR (Y_in, maxYInPQ, SDR_YInPQ);
-
-                        if (Y_out + Y_in > 0.0f)
-                        {
-                          ICtCp.m128_f32 [0] = std::pow (XMVectorGetX (ICtCp), 1.18f);
-
-                          float I0      = XMVectorGetX (ICtCp);
-                          float I1      = 0.0f;
-                          float I_scale = 0.0f;
-
-                          ICtCp.m128_f32 [0] *=
-                            std::max ((Y_out / Y_in), 0.0f);
-
-                          I1 = XMVectorGetX (ICtCp);
-
-                          if (I0 != 0.0f && I1 != 0.0f)
-                          {
-                            I_scale =
-                              std::min (I0 / I1, I1 / I0);
-                          }
-
-                          ICtCp.m128_f32 [1] *= I_scale;
-                          ICtCp.m128_f32 [2] *= I_scale;
-                        }
-
-                        value =
-                          ICtCptoRec709 (ICtCp);
-
-                        maxTonemappedRGB =
-                          XMVectorMax (maxTonemappedRGB, XMVectorMax (value, g_XMZero));
-
-                        outPixels [j] = value;
-                      }
-                    }, final_sdr) : E_POINTER;
+                  for (auto& job : parallel_jobs)
+                  {
+                    maxTonemappedRGB =
+                      XMVectorMax (job.maxTonemappedRGB, maxTonemappedRGB);
+                  }
 
                   float fMaxR = XMVectorGetX (maxTonemappedRGB);
                   float fMaxG = XMVectorGetY (maxTonemappedRGB);
@@ -1911,6 +1719,13 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                                 )
                    )
                 {
+#if 0
+                  if (codec == WIC_CODEC_JPEG && hdr)
+                  {
+                    SK_Screenshot_SaveUHDR (raw_img, *un_scrgb.GetImages (), wszAbsolutePathToScreenshot);
+                  }
+#endif
+
                   if ( config.steam.screenshots.enable_hook &&
                           steam_ctx.Screenshots () != nullptr )
                   {
@@ -2128,14 +1943,6 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                           {    pDst [j] = 255UL;        }
                         } break;
 
-                      //case DXGI_FORMAT_R10G10B10A2_UNORM:
-                      //{
-                      //  for ( UINT j = 3                          ;
-                      //             j < pFrameData->PackedDstPitch ;
-                      //             j += 4 )
-                      //  {    pDst [j]  |=  0x3;       }
-                      //} break;
-
                         case DXGI_FORMAT_R16G16B16A16_FLOAT:
                         {
                           using namespace DirectX::PackedVector;
@@ -2198,9 +2005,15 @@ SK_D3D11_ProcessScreenshotQueueEx ( SK_ScreenshotStage stage_,
                                                                                     static_cast <uint16_t> (std::max (0.0f, pFrameData->hdr.avg_cll_nits)));
                       }
 
+                      if (hdr && config.screenshots.use_jxl)
+                      {
+                        SK_Screenshot_SaveJXL (un_srgb, wszAbsolutePathToLossless);
+                      }
+
                       HRESULT hrSaveToWIC = S_OK;
 
-                      if ((! hdr) || (! config.screenshots.use_avif))
+                      if ((! hdr) || (! (config.screenshots.use_avif ||
+                                         config.screenshots.use_jxl)))
                       {
                         const bool bUseCompatHacks =
                           config.screenshots.compatibility_mode;

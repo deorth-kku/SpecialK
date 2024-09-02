@@ -1,4 +1,150 @@
-﻿24.8.11
+﻿24.8.29
+=======
+ + Added support for AVIF and JXL screenshots in 32-bit games (finally)
+
+24.8.28
+=======
+ + Use 2.2 gamma when HDR color correcting third-party overlays instead of sRGB
+ + Brighten alpha transparency on Steam overlay in HDR10 mode
+ + Add support for UltraHDR JPEG screenshot encoding
+
+24.8.27.1
+=========
+ + Fixed potential crash if DLSS text OSD is enabled and game completely turns
+     DLSS off.
+
+24.8.27
+=======
+ + Fixed mouse performance issues in Black Myth: Wukong when the cursor is
+     inside the game window's client region.
+
+24.8.26.3
+=========
+ + Fix intermittent mouse cursor flickering after opening SK's control panel
+     in some games.
+ + Re-implement feature to save and restore mouse cursor position when the
+     control panel is opened / closed.
+ + Do not center mouse cursor on control panel if it is already hovering one
+     of SK's mouse-interactable widgets (i.e. HDR).
+
+24.8.26.2
+=========
+ + Perform HDR->SDR tonemapping in parallel on multiple threads to reduce
+     wait time to paste tonemapped screenshots.
+ + Optimize clipboard acquire lock/release behavior.
+
+24.8.26.1
+=========
+ + Fixed JPEG XL DLLs not downloading correctly when selected from the HDR menu
+
+24.8.26
+=======
+ + Patch end-of-frame anti-debug checks for graphics debuggers out of FFXVI
+
+24.8.25
+=======
+ + Implement half-float (scRGB) and uint16 (HDR10) lossless JPEG XL encoding
+
+24.8.24.4
+=========
+ + Disable Final Fantasy XVI's Splash Screen so it cannot break DirectFlip
+     >> Only works for Global Injection
+
+24.8.24.3
+=========
+ + Reduce the number of threads Final Fantasy XVI uses for JPEG XL screenshots
+     in its photo mode to eliminate hitching (libjxl spawns 1 thread per-core).
+
+24.8.24.2
+=========
+ + Transform HDR10 to scRGB before encoding JPEG XL screenshots in HDR10 games
+
+24.8.24.1
+=========
+ + Added support for JPEG XL screenshots (64-bit only; 32-bit will be added)
+
+   * Default quality level is 99%, this is primarily a lossy format.
+   * JXL lossless compression ratio is poor, but not as poor as PNG.
+   * AVIF or PNG are better choices for sharing lossless reference images.
+
+24.8.24
+=======
+ + Fixed issues with "hide mouse cursor" feature not working in some games
+     after alt-tab following changes in 24.5.25.2.
+ + Fixed potential black pixel artifacts on ImGui's UI when using HDR10->scRGB
+     translation mode.
+
+24.8.22.1
+=========
+ + Add workaround for FFXVI beeping after Alt-Tab because it thinks the Alt
+     key is stuck down.
+
+24.8.22
+=======
+ + Added FFXVI plug-in to improve JPEG XL screenshot quality after looking at
+     the artifacts caused by Square-Enix's default compression settings.
+
+    >> Screenshots are now 16-bpc instead of 8-bpc and quality set to 98.5%
+
+    * Lossless screenshots are possible, but will be significantly larger.
+
+24.8.21
+=======
+ + Fixed potential DLSS3 Frame Generation crash when exiting Final Fantasy XVI
+
+24.8.20
+=======
+ + Increased opacity of SK's UI in HDR10 mode.
+ + Fixed a typo in ApplySRGBCurve (...) in shaders/common_defs.hlsl that
+     would cause black clipping when converting between sRGB and Linear
+       when direct copies between two resources are impossible due
+         to format mismatch.
+
+24.8.19
+=======
+ + Correctly distinguish FFXVI from FFXV since the executable naming
+     pattern's underscore and store name are consistent.
+
+24.8.18
+=======
+ + Add LastUsedColorSpace INI setting to help tonemap third-party
+     overlays in D3D12 games with native HDR support
+ + Reduce luminance histogram buckets for frequency analysis during
+     tonemapping to 16384
+
+24.8.17.1
+=========
+ + Byte-swap > 1-byte fields in PNG chunks when building on x86/x64
+ + Use 99.5th percentile luminance for PNG / AVIF MaxCLL as discussed:
+     https://ieeexplore.ieee.org/stamp/stamp.jsp?arnumber=9508136
+
+24.8.17
+=======
+ + Fixed artifacts when using Gamut Expansion on input colors wider than AP1
+ + Improved alpha transparency when drawing SK's UI in HDR10
+
+24.8.16.2
+=========
+ + Fixed PQ being 1/125th as bright as it should be in AVIF and PNG screenshots
+
+24.8.16.1
+=========
+ + Write 99th percentile luminance to AVIF MaxCLL metadata
+ + Improve PQ <--> Linear calculations for pixels in > Rec 709 gamuts
+    * Improves HDR->SDR tone mapping in some games
+
+24.8.16
+=======
+ + Write 99th percentile luminance to HDR PNG clli chunk
+ + Reverse the search direction (high->low) when searching percentile cutoffs
+     using luminance histogram buckets for larger values and quicker calculation
+
+24.8.11.1
+=========
+ + Fixed display of achievement titles and descriptions containing % characters
+     in ImGui popups since ImGui expects a printf-formatted string...
+
+24.8.11
 =======
  + Improved handling of wide gamut scRGB colors when doing HDR->SDR tonemapping
 
@@ -2868,7 +3014,7 @@
 23.12.22
 ========
  + Added option to use compatibility hacks when storing screenshots to make
-     them work with software that does not completely implement AVIF and JPEG-XR
+     them work with software that does not completely implement AVIF and JPEG XR
        decoding.
 
    Global\osd.ini:
@@ -2937,7 +3083,7 @@
 
 23.12.18.2
 ==========
- + Added compression quality setting for JPEG-XR HDR screenshots (Default: 90%)
+ + Added compression quality setting for JPEG XR HDR screenshots (Default: 90%)
 
 23.12.18.1
 ==========

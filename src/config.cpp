@@ -273,11 +273,22 @@ SK_GetCurrentGameID (void)
       if (app_id == 1382330)
         current_game = SK_GAME_ID::Persona5Strikers;
 
-      if ( StrStrIW ( SK_GetHostApp (), L"ffxv" ) )
+      if ( StrStrIW ( SK_GetHostApp (), L"ffxv" ) ==
+                      SK_GetHostApp () )
       {
-        current_game = SK_GAME_ID::FinalFantasyXV;
+        if ( StrStrIW ( SK_GetHostApp (), L"ffxv_" ) )
+        {
+          current_game = SK_GAME_ID::FinalFantasyXV;
 
-        SK_FFXV_InitPlugin ();
+          SK_FFXV_InitPlugin ();
+        }
+
+        else if ( StrStrIW ( SK_GetHostApp (), L"ffxvi" ) )
+        {
+          current_game = SK_GAME_ID::FinalFantasyXVI;
+
+          SK_FFXVI_InitPlugin ();
+        }
       }
 
       else if ( StrStrIW ( SK_GetHostApp (), L"ff7remake" ) )
@@ -672,6 +683,10 @@ struct {
   struct {
     sk::ParameterBool*    store_hdr               = nullptr;
   } png;
+
+  struct {
+    sk::ParameterBool*    use_jxl                 = nullptr;
+  } jxl;
 } screenshots;
 
 struct {
@@ -919,6 +934,7 @@ struct {
     sk::ParameterBool*    enable_32bpc            = nullptr;
     sk::ParameterBool*    remaster_8bpc_as_unorm  = nullptr;
     sk::ParameterBool*    remaster_subnative_unorm= nullptr;
+    sk::ParameterInt*     last_used_colorspace    = nullptr;
   } hdr;
 } render;
 
@@ -1544,7 +1560,8 @@ auto DeclKeybind =
     ConfigEntry (screenshots.override_path,              L"Where to store screenshots (if non-empty)",                 osd_ini,         L"Screenshot.System",     L"OverridePath"),
     ConfigEntry (screenshots.filename_format,            L"wcsftime format; Non-Standard Specifier: %G = <Game Name>", osd_ini,         L"Screenshot.System",     L"FilenameFormat"),
     ConfigEntry (screenshots.compression_quality,        L"Compression Quality: 0=Worst, 100=Lossless",                osd_ini,         L"Screenshot.System",     L"Quality"),
-    ConfigEntry (screenshots.compatibility_mode,         L"Use less advanced encoding in JPEG-XR and AVIF for compat.",osd_ini,         L"Screenshot.System",     L"CompatibilityMode"),
+    ConfigEntry (screenshots.compatibility_mode,         L"Use less advanced encoding in JPEG XR and AVIF for compat.",osd_ini,         L"Screenshot.System",     L"CompatibilityMode"),
+    ConfigEntry (screenshots.jxl.use_jxl,                L"Use JPEG XL file format for HDR screenshots",               osd_ini,         L"Screenshot.System",     L"UseJPEGXL"),
     ConfigEntry (screenshots.avif.use_avif,              L"Use AVIF file format for HDR screenshots",                  osd_ini,         L"Screenshot.System",     L"UseAVIF"),
     ConfigEntry (screenshots.avif.yuv_subsampling,       L"Chroma Subsampling (444, 422, 420, 400)",                   osd_ini,         L"Screenshot.AVIF",       L"SubsampleYUV"),
     ConfigEntry (screenshots.avif.scrgb_bit_depth,       L"Bits to use for scRGB to PQ encoded images",                osd_ini,         L"Screenshot.AVIF",       L"scRGBtoPQBits"),
@@ -1845,6 +1862,7 @@ auto DeclKeybind =
     ConfigEntry (render.hdr.enable_32bpc,                L"Experimental - Use 32bpc for HDR",                          dll_ini,         L"SpecialK.HDR",          L"Enable128BitPipeline"),
     ConfigEntry (render.hdr.remaster_8bpc_as_unorm,      L"Do not use Floating-Point RTs when re-mastering 8-bpc+ RTs",dll_ini,         L"SpecialK.HDR",          L"Keep8BpcRemastersUNORM"),
     ConfigEntry (render.hdr.remaster_subnative_unorm,    L"Do not use FP RTs when re-mastering reduced resolution RTS",dll_ini,         L"SpecialK.HDR",          L"KeepSubnativeRemastersUNORM"),
+    ConfigEntry (render.hdr.last_used_colorspace,        L"Last Used DXGI Colorspace; auto-enables HDR features...",   dll_ini,         L"SpecialK.HDR",          L"LastUsedColorSpace"),
 
     ConfigEntry (render.osd.draw_in_vidcap,              L"Changes hook order in order to allow recording the OSD.",   dll_ini,         L"Render.OSD",            L"ShowInVideoCapture"),
 
@@ -4035,6 +4053,7 @@ auto DeclKeybind =
   render.hdr.enable_32bpc->load              (config.render.hdr.enable_32bpc);
   render.hdr.remaster_8bpc_as_unorm->load    (config.render.hdr.remaster_8bpc_as_unorm);
   render.hdr.remaster_subnative_unorm->load  (config.render.hdr.remaster_subnative_as_unorm);
+  render.hdr.last_used_colorspace->load      (config.render.hdr.last_used_colorspace);
 
   render.framerate.wait_for_vblank->load     (config.render.framerate.wait_for_vblank);
   render.framerate.buffer_count->load        (config.render.framerate.buffer_count);
@@ -5108,6 +5127,8 @@ auto DeclKeybind =
   screenshots.compression_quality->load       (config.screenshots.compression_quality);
   screenshots.compatibility_mode->load        (config.screenshots.compatibility_mode);
 
+  screenshots.jxl.use_jxl->load               (config.screenshots.use_jxl);
+
   screenshots.avif.use_avif->load             (config.screenshots.use_avif);
   screenshots.avif.yuv_subsampling->load      (config.screenshots.avif.yuv_subsampling);
   screenshots.avif.scrgb_bit_depth->load      (config.screenshots.avif.scrgb_bit_depth);
@@ -5115,10 +5136,6 @@ auto DeclKeybind =
 
   screenshots.png.store_hdr->load             (config.screenshots.use_hdr_png);
   screenshots.allow_hdr_clipboard->load       (config.screenshots.allow_hdr_clipboard);
-
-  // AVIF Unsupported in 32-bit
-  if (SK_GetBitness () == SK_Bitness::ThirtyTwoBit)
-    config.screenshots.use_avif = false;
 
   LoadKeybind (&config.render.keys.hud_toggle);
   LoadKeybind (&config.osd.keys.console_toggle);
@@ -6179,6 +6196,7 @@ SK_SaveConfig ( std::wstring name,
       render.hdr.enable_32bpc->store              (config.render.hdr.enable_32bpc);
       render.hdr.remaster_8bpc_as_unorm->store    (config.render.hdr.remaster_8bpc_as_unorm);
       render.hdr.remaster_subnative_unorm->store  (config.render.hdr.remaster_subnative_as_unorm);
+      render.hdr.last_used_colorspace->store      (config.render.hdr.last_used_colorspace);
 
       texture.d3d11.cache->store                  (config.textures.d3d11.cache);
       texture.d3d11.use_l3_hash->store            (config.textures.d3d11.use_l3_hash);
@@ -6441,14 +6459,11 @@ SK_SaveConfig ( std::wstring name,
   screenshots.png.store_hdr->store             (config.screenshots.use_hdr_png);
   screenshots.allow_hdr_clipboard->store       (config.screenshots.allow_hdr_clipboard);
 
-  // AVIF Unsupported in 32-bit
-  if (SK_GetBitness () != SK_Bitness::ThirtyTwoBit)
-  {
-    screenshots.avif.use_avif->store           (config.screenshots.use_avif);
-    screenshots.avif.yuv_subsampling->store    (config.screenshots.avif.yuv_subsampling);
-    screenshots.avif.scrgb_bit_depth->store    (config.screenshots.avif.scrgb_bit_depth);
-    screenshots.avif.compression_speed->store  (config.screenshots.avif.compression_speed);
-  }
+  screenshots.jxl.use_jxl->store               (config.screenshots.use_jxl);
+  screenshots.avif.use_avif->store             (config.screenshots.use_avif);
+  screenshots.avif.yuv_subsampling->store      (config.screenshots.avif.yuv_subsampling);
+  screenshots.avif.scrgb_bit_depth->store      (config.screenshots.avif.scrgb_bit_depth);
+  screenshots.avif.compression_speed->store    (config.screenshots.avif.compression_speed);
 
   uplay.overlay.hdr_luminance->store           (config.uplay.overlay_luminance);
   discord.overlay.hdr_luminance->store         (config.discord.overlay_luminance);

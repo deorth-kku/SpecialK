@@ -31,6 +31,11 @@
 
 #include <SpecialK/render/present_mon/TraceSession.hpp>
 
+#ifdef  __SK_SUBSYSTEM__
+#undef  __SK_SUBSYSTEM__
+#endif
+#define __SK_SUBSYSTEM__ L"GlobalHook"
+
 #define SK_INVALID_HANDLE nullptr
 
 NtUserSetWindowsHookEx_pfn    NtUserSetWindowsHookEx    = nullptr;
@@ -1157,7 +1162,7 @@ GetModuleLoadCount (HMODULE hDll)
       //  http://www.geoffchappell.com/studies/windows/win32/ntdll/structs/ldr_data_table_entry.htm
       //
       unsigned long long offDdagNode =
-        (0x14 - BITNESS) * sizeof (void *);   // See offset on LDR_DDAG_NODE *DdagNode;
+        (unsigned long long)(0x14 - BITNESS) * sizeof (void *);   // See offset on LDR_DDAG_NODE *DdagNode;
 
       ULONG count        = 0;
       char* addrDdagNode = ((char *)pLdrEntry) + offDdagNode;
@@ -1530,7 +1535,7 @@ SKX_RemoveCBTHook (void)
       DWORD_PTR dwpResult = 0x0;
       SendMessageTimeout ( HWND_BROADCAST,
                             WM_NULL, 0, 0,
-                         SMTO_ABORTIFHUNG,
+                               SMTO_BLOCK,
                                       8UL,
                &dwpResult );
 

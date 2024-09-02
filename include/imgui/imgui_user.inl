@@ -1467,7 +1467,7 @@ ImGui_WndProcHandler ( HWND   hWnd,   UINT   msg,
             const bool ansi = pDevA->dbcc_size == sizeof (DEV_BROADCAST_DEVICEINTERFACE_A);
             const bool wide = pDevW->dbcc_size == sizeof (DEV_BROADCAST_DEVICEINTERFACE_W);
 
-            wchar_t wszFileName [MAX_PATH];
+            wchar_t wszFileName [MAX_PATH] = { };
 
             if (ansi)
             {
@@ -2067,7 +2067,7 @@ SK_ImGui_PollGamepad_EndFrame (XINPUT_STATE* pState)
             (     state.Gamepad.wButtons & XINPUT_GAMEPAD_A)     &&
           (!(last_state.Gamepad.wButtons & XINPUT_GAMEPAD_A)))
         {
-          SendMessage (GetDesktopWindow (), WM_SYSCOMMAND, SC_SCREENSAVE, 0);
+          SendMessageTimeout (GetDesktopWindow (), WM_SYSCOMMAND, SC_SCREENSAVE, 0, SMTO_BLOCK, INFINITE, nullptr);
         }
 
         if ((     state.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE) &&

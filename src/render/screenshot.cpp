@@ -199,76 +199,6 @@ SK_ScreenshotManager::getBasePath (void) const
   return         wszAbsolutePathToScreenshots;
 }
 
-struct ParamsPQ
-{
-  DirectX::XMVECTOR N, M;
-  DirectX::XMVECTOR C1, C2, C3;
-  DirectX::XMVECTOR MaxPQ;
-};
-
-static const ParamsPQ PQ =
-{
-  DirectX::XMVectorReplicate (2610.0 / 4096.0 / 4.0),   // N
-  DirectX::XMVectorReplicate (2523.0 / 4096.0 * 128.0), // M
-  DirectX::XMVectorReplicate (3424.0 / 4096.0),         // C1
-  DirectX::XMVectorReplicate (2413.0 / 4096.0 * 32.0),  // C2
-  DirectX::XMVectorReplicate (2392.0 / 4096.0 * 32.0),  // C3
-  DirectX::XMVectorReplicate (125.0),
-};
-
-static auto XMVectorSign = [](DirectX::XMVECTOR v)
-{
-using namespace DirectX;
-
-  XMVECTOR Control = XMVectorLess   (v, g_XMZero);
-  XMVECTOR Sign    = XMVectorSelect (g_XMOne, g_XMNegativeOne, Control);
-
-  return Sign;
-};
-
-static auto PQToLinear = [](DirectX::XMVECTOR N, DirectX::XMVECTOR maxPQValue = PQ.MaxPQ)
-{
-using namespace DirectX;
-
-  XMVECTOR ret;
-  XMVECTOR sign_N = XMVectorSign (N);
-
-  ret =
-    XMVectorPow (XMVectorAbs (N), XMVectorDivide (g_XMOne, PQ.M));
-
-  XMVECTOR nd;
-
-  nd =
-    XMVectorDivide (
-      XMVectorMax (XMVectorSubtract (ret, PQ.C1), g_XMZero),
-                   XMVectorSubtract (     PQ.C2,
-            XMVectorMultiply (PQ.C3, ret)));
-
-  ret =
-    XMVectorMultiply (sign_N, XMVectorMultiply (XMVectorPow (XMVectorAbs (nd), XMVectorDivide (g_XMOne, PQ.N)), maxPQValue));
-
-  return ret;
-};
-
-static auto LinearToPQ = [](DirectX::XMVECTOR N, DirectX::XMVECTOR maxPQValue = PQ.MaxPQ)
-{
-  using namespace DirectX;
-
-  XMVECTOR ret;
-
-  ret =
-    XMVectorMultiply (XMVectorSign (XMVectorDivide (N, maxPQValue)), XMVectorPow (XMVectorAbs (XMVectorDivide (N, maxPQValue)), PQ.N));
-
-  XMVECTOR nd =
-    XMVectorDivide (
-       XMVectorAdd (  PQ.C1, XMVectorMultiply (PQ.C2, ret)),
-       XMVectorAdd (g_XMOne, XMVectorMultiply (PQ.C3, ret))
-    );
-
-  return
-    XMVectorMultiply (XMVectorSign (nd), XMVectorPow (XMVectorAbs (nd), PQ.M));
-};
-
 bool
 SK_HDR_ConvertImageToPNG (const DirectX::Image& raw_hdr_img, DirectX::ScratchImage& png_img)
 {
@@ -298,23 +228,15 @@ SK_HDR_ConvertImageToPNG (const DirectX::Image& raw_hdr_img, DirectX::ScratchIma
     if (rgb16_pixels == nullptr)
       return false;
 
-    static const XMMATRIX c_from709to2020 =
-    {
-      0.627225305694944f,  0.0690418812810714f, 0.0163911702607078f, 0.0f,
-      0.329476882715808f,  0.919605681354755f,  0.0880887513437058f, 0.0f,
-      0.0432978115892484f, 0.0113524373641739f, 0.895520078395586f,  0.0f,
-      0.0f,                0.0f,                0.0f,                1.0f
-    };
-
     EvaluateImage ( raw_hdr_img,
     [&](const XMVECTOR* pixels, size_t width, size_t y)
     {
       UNREFERENCED_PARAMETER(y);
 
-      static const XMVECTOR pq_range_10bpc = XMVectorReplicate (1023.0f),
-                            pq_range_12bpc = XMVectorReplicate (4095.0f),
-                            pq_range_16bpc = XMVectorReplicate (65535.0f),
-                            pq_range_32bpc = XMVectorReplicate (4294967295.0f);
+      static const XMVECTOR pq_range_10bpc = XMVectorReplicate (1024.0f),
+                            pq_range_12bpc = XMVectorReplicate (4096.0f),
+                            pq_range_16bpc = XMVectorReplicate (65536.0f),
+                            pq_range_32bpc = XMVectorReplicate (4294967296.0f);
 
       auto pq_range_out =
         (typeless_fmt == DXGI_FORMAT_R10G10B10A2_TYPELESS)  ? pq_range_10bpc :
@@ -345,11 +267,8 @@ SK_HDR_ConvertImageToPNG (const DirectX::Image& raw_hdr_img, DirectX::ScratchIma
         if (typeless_fmt == DXGI_FORMAT_R16G16B16A16_TYPELESS ||
             typeless_fmt == DXGI_FORMAT_R32G32B32A32_TYPELESS)
         {
-          XMVECTOR  value = XMVector3Transform (v, c_from709to2020);
-          XMVECTOR nvalue = XMVectorDivide     ( XMVectorMax (g_XMZero,
-                                                   XMVectorMin (value, PQ.MaxPQ)),
-                                                                       PQ.MaxPQ );
-                        v = LinearToPQ (nvalue);
+          v =
+            LinearToPQ (XMVectorMax (XMVector3Transform (v, c_from709to2020), g_XMZero));
         }
 
         v = // Quantize to 10- or 12-bpc before expanding to 16-bpc in order to improve
@@ -415,30 +334,44 @@ SK_PNG_CopyToClipboard (const DirectX::Image& image, const void *pData, size_t d
 
   SK_ReleaseAssert (data_size <= DWORD_MAX);
 
-  if (OpenClipboard (nullptr))
+  int clpSize = sizeof (DROPFILES);
+
+  clpSize += sizeof (wchar_t) * static_cast <int> (wcslen ((wchar_t *)pData) + 1); // + 1 => '\0'
+  clpSize += sizeof (wchar_t);                                                     // two \0 needed at the end
+
+  HDROP hdrop =
+    (HDROP)GlobalAlloc (GHND, clpSize);
+
+  DROPFILES* df =
+    (DROPFILES *)GlobalLock (hdrop);
+
+  if (df != nullptr)
   {
-    int clpSize = sizeof (DROPFILES);
-
-    clpSize += sizeof (wchar_t) * static_cast <int> (wcslen ((wchar_t *)pData) + 1); // + 1 => '\0'
-    clpSize += sizeof (wchar_t);                                                     // two \0 needed at the end
-
-    HDROP hdrop =
-      (HDROP)GlobalAlloc (GHND, clpSize);
-
-    DROPFILES* df =
-      (DROPFILES *)GlobalLock (hdrop);
-
     df->pFiles = sizeof (DROPFILES);
     df->fWide  = TRUE;
 
     wcscpy ((wchar_t*)&df [1], (const wchar_t *)pData);
 
-    GlobalUnlock     (hdrop);
-    EmptyClipboard   ();
-    SetClipboardData (CF_HDROP, hdrop);
-    CloseClipboard   ();
+    bool clipboard_open = false;
+    for (UINT i = 0 ; i < 5 ; ++i)
+    {
+      clipboard_open = OpenClipboard (game_window.hWnd);
 
-    return true;
+      if (! clipboard_open)
+        SK_Sleep (2);
+    }
+
+    if (clipboard_open)
+    {
+      EmptyClipboard   ();
+      SetClipboardData (CF_HDROP, hdrop);
+      GlobalUnlock               (hdrop);
+      CloseClipboard   ();
+
+      return true;
+    }
+
+    GlobalUnlock (hdrop);
   }
 
   return false;
@@ -497,113 +430,119 @@ SK_ScreenshotManager::copyToClipboard ( const DirectX::Image& image,
       }
     }
   }
+ 
+  auto snip = 
+    getSnipRect ();
 
-  if (OpenClipboard (nullptr))
+  const DirectX::Image *pImg = &image;
+  DirectX::ScratchImage sub_img;
+
+  if (snip.w != 0 && snip.h != 0)
   {
-    auto snip = 
-      getSnipRect ();
-
-    const DirectX::Image *pImg = &image;
-    DirectX::ScratchImage sub_img;
-
-    if (snip.w != 0 && snip.h != 0)
+    if (SUCCEEDED (sub_img.Initialize2D (pImg->format, snip.w, snip.h, 1, 1)))
     {
-      if (SUCCEEDED (sub_img.Initialize2D (pImg->format, snip.w, snip.h, 1, 1)))
+      if (SUCCEEDED (DirectX::CopyRectangle (image, snip, *sub_img.GetImage (0,0,0), 0, 0, 0)))
       {
-        if (SUCCEEDED (DirectX::CopyRectangle (image, snip, *sub_img.GetImage (0,0,0), 0, 0, 0)))
-        {
-          pImg =
-            sub_img.GetImages ();
+        pImg =
+          sub_img.GetImages ();
 
-          SK_GetCurrentRenderBackend ().screenshot_mgr->setSnipRect ({0,0,0,0});
-        }
+        SK_GetCurrentRenderBackend ().screenshot_mgr->setSnipRect ({0,0,0,0});
       }
     }
+  }
 
-    const int
-        _bpc    =
-      sk::narrow_cast <int> (DirectX::BitsPerPixel (pImg->format)),
-        _width  =
-      sk::narrow_cast <int> (                       pImg->width),
-        _height =
-      sk::narrow_cast <int> (                       pImg->height);
+  const int
+      _bpc    =
+    sk::narrow_cast <int> (DirectX::BitsPerPixel (pImg->format)),
+      _width  =
+    sk::narrow_cast <int> (                       pImg->width),
+      _height =
+    sk::narrow_cast <int> (                       pImg->height);
 
-    SK_ReleaseAssert (pImg->format == DXGI_FORMAT_B8G8R8X8_UNORM ||
-                      pImg->format == DXGI_FORMAT_B8G8R8A8_UNORM ||
-                      pImg->format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB);
+  SK_ReleaseAssert (pImg->format == DXGI_FORMAT_B8G8R8X8_UNORM ||
+                    pImg->format == DXGI_FORMAT_B8G8R8A8_UNORM ||
+                    pImg->format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB);
 
-    HBITMAP hBitmapCopy =
-       CreateBitmap (
-         _width, _height, 1,
-           _bpc, pImg->pixels
-       );
+  HBITMAP hBitmapCopy =
+     CreateBitmap (
+       _width, _height, 1,
+         _bpc, pImg->pixels
+     );
 
-    BITMAPINFOHEADER
-      bmh                 = { };
-      bmh.biSize          = sizeof (BITMAPINFOHEADER);
-      bmh.biWidth         =   _width;
-      bmh.biHeight        =  -_height;
-      bmh.biPlanes        =  1;
-      bmh.biBitCount      = sk::narrow_cast <WORD> (_bpc);
-      bmh.biCompression   = BI_RGB;
-      bmh.biXPelsPerMeter = 10;
-      bmh.biYPelsPerMeter = 10;
+  BITMAPINFOHEADER
+    bmh                 = { };
+    bmh.biSize          = sizeof (BITMAPINFOHEADER);
+    bmh.biWidth         =   _width;
+    bmh.biHeight        =  -_height;
+    bmh.biPlanes        =  1;
+    bmh.biBitCount      = sk::narrow_cast <WORD> (_bpc);
+    bmh.biCompression   = BI_RGB;
+    bmh.biXPelsPerMeter = 10;
+    bmh.biYPelsPerMeter = 10;
 
-    BITMAPINFO
-      bmi                 = { };
-      bmi.bmiHeader       = bmh;
+  BITMAPINFO
+    bmi                 = { };
+    bmi.bmiHeader       = bmh;
 
-    HDC hdcDIB =
-      CreateCompatibleDC (GetDC (nullptr));
+  HDC hdcDIB =
+    CreateCompatibleDC (GetDC (nullptr));
 
-    void* bitplane = nullptr;
+  void* bitplane = nullptr;
 
-    HBITMAP
-      hBitmap =
-        CreateDIBSection ( hdcDIB, &bmi, DIB_RGB_COLORS,
-            &bitplane, nullptr, 0 );
-    memcpy ( bitplane,
-               pImg->pixels,
-        static_cast <size_t> (_bpc / 8) *
-        static_cast <size_t> (_width  ) *
-        static_cast <size_t> (_height )
-           );
+  HBITMAP
+    hBitmap =
+      CreateDIBSection ( hdcDIB, &bmi, DIB_RGB_COLORS,
+          &bitplane, nullptr, 0 );
+  memcpy ( bitplane,
+             pImg->pixels,
+      static_cast <size_t> (_bpc / 8) *
+      static_cast <size_t> (_width  ) *
+      static_cast <size_t> (_height )
+         );
 
-    HDC hdcSrc = CreateCompatibleDC (GetDC (nullptr));
-    HDC hdcDst = CreateCompatibleDC (GetDC (nullptr));
+  HDC hdcSrc = CreateCompatibleDC (GetDC (nullptr));
+  HDC hdcDst = CreateCompatibleDC (GetDC (nullptr));
 
-    if ( hBitmap    != nullptr &&
-        hBitmapCopy != nullptr )
+  if ( hBitmap    != nullptr &&
+      hBitmapCopy != nullptr )
+  {
+    auto hbmpSrc = (HBITMAP)SelectObject (hdcSrc, hBitmap);
+    auto hbmpDst = (HBITMAP)SelectObject (hdcDst, hBitmapCopy);
+
+    BitBlt (hdcDst, 0, 0, _width,
+                          _height, hdcSrc, 0, 0, SRCCOPY);
+
+    SelectObject     (hdcSrc, hbmpSrc);
+    SelectObject     (hdcDst, hbmpDst);
+
+    bool clipboard_open = false;
+    for (UINT i = 0 ; i < 5 ; ++i)
     {
-      auto hbmpSrc = (HBITMAP)SelectObject (hdcSrc, hBitmap);
-      auto hbmpDst = (HBITMAP)SelectObject (hdcDst, hBitmapCopy);
+      clipboard_open = OpenClipboard (game_window.hWnd);
 
-      BitBlt (hdcDst, 0, 0, _width,
-                            _height, hdcSrc, 0, 0, SRCCOPY);
+      if (! clipboard_open)
+        SK_Sleep (2);
+    }
 
-      SelectObject     (hdcSrc, hbmpSrc);
-      SelectObject     (hdcDst, hbmpDst);
-
+    if (clipboard_open)
+    {
       EmptyClipboard   ();
       SetClipboardData (CF_BITMAP, hBitmapCopy);
+      CloseClipboard   ();
     }
+  }
 
-    CloseClipboard   ();
+  DeleteDC         (hdcSrc);
+  DeleteDC         (hdcDst);
+  DeleteDC         (hdcDIB);
 
-    DeleteDC         (hdcSrc);
-    DeleteDC         (hdcDst);
-    DeleteDC         (hdcDIB);
+  if ( hBitmap     != nullptr &&
+       hBitmapCopy != nullptr )
+  {
+    DeleteBitmap   (hBitmap);
+    DeleteBitmap   (hBitmapCopy);
 
-    if ( hBitmap     != nullptr &&
-         hBitmapCopy != nullptr )
-    {
-      DeleteBitmap   (hBitmap);
-      DeleteBitmap   (hBitmapCopy);
-
-      return true;
-    }
-
-    return false;
+    return true;
   }
 
   return false;
@@ -983,32 +922,22 @@ SK_Screenshot_SaveAVIF (DirectX::ScratchImage &src_image, const wchar_t *wszFile
 
           for (size_t j = 0; j < width; ++j)
           {
-            DirectX::XMVECTOR v =
-              XMVectorSaturate (*pixels++);
+            DirectX::XMVECTOR v = *pixels++;
 
-            *(rgb_pixels++) = static_cast <uint16_t> (roundf (XMVectorGetX (v) * 1023.0f));
-            *(rgb_pixels++) = static_cast <uint16_t> (roundf (XMVectorGetY (v) * 1023.0f));
-            *(rgb_pixels++) = static_cast <uint16_t> (roundf (XMVectorGetZ (v) * 1023.0f));
+            *(rgb_pixels++) = static_cast <uint16_t> (std::min (1023, static_cast <int> (XMVectorGetX (v) * 1024.0f)));
+            *(rgb_pixels++) = static_cast <uint16_t> (std::min (1023, static_cast <int> (XMVectorGetY (v) * 1024.0f)));
+            *(rgb_pixels++) = static_cast <uint16_t> (std::min (1023, static_cast <int> (XMVectorGetZ (v) * 1024.0f)));
           }
         } );
       } break;
 
       case DXGI_FORMAT_R16G16B16A16_FLOAT:
       {
-        static const XMMATRIX c_from709to2020 = // Transposed
-        {
-          0.627225305694944f,  0.0690418812810714f, 0.0163911702607078f, 0.0f,
-          0.329476882715808f,  0.919605681354755f,  0.0880887513437058f, 0.0f,
-          0.0432978115892484f, 0.0113524373641739f, 0.895520078395586f,  0.0f,
-          0.0f,                0.0f,                0.0f,                1.0f
-        };
-
         uint16_t* rgb_pixels = (uint16_t *)rgb.pixels;
 
         DirectX::ScratchImage
           hdr10_img;
           hdr10_img.InitializeFromImage (*src_image.GetImages ());
-
 
         EvaluateImage ( src_image.GetImages     (),
                         src_image.GetImageCount (),
@@ -1019,16 +948,14 @@ SK_Screenshot_SaveAVIF (DirectX::ScratchImage &src_image, const wchar_t *wszFile
 
           for (size_t j = 0; j < width; ++j)
           {
-            XMVECTOR  value = XMVector3Transform (pixels [j], c_from709to2020);
-            XMVECTOR nvalue = XMVectorDivide ( XMVectorMax (g_XMZero,
-                                               XMVectorMin (value, PQ.MaxPQ)),
-                                                                   PQ.MaxPQ);
+            XMVECTOR value = pixels [j];
 
-                      value = XMVectorSaturate (LinearToPQ (nvalue));
+            value =
+              LinearToPQ (XMVectorMax (XMVector3Transform (value, c_from709to2020), g_XMZero));
 
-            *(rgb_pixels++) = static_cast <uint16_t> (roundf (XMVectorGetX (value) * 65535.0f));
-            *(rgb_pixels++) = static_cast <uint16_t> (roundf (XMVectorGetY (value) * 65535.0f));
-            *(rgb_pixels++) = static_cast <uint16_t> (roundf (XMVectorGetZ (value) * 65535.0f));
+            *(rgb_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (XMVectorGetX (value) * 65536.0f)));
+            *(rgb_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (XMVectorGetY (value) * 65536.0f)));
+            *(rgb_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (XMVectorGetZ (value) * 65536.0f)));
           }
         } );
       } break;
@@ -1095,6 +1022,381 @@ SK_Screenshot_SaveAVIF (DirectX::ScratchImage &src_image, const wchar_t *wszFile
 
   return
     ( encodeResult == AVIF_RESULT_OK );
+}
+
+#include <jxl/codestream_header.h>
+#include <jxl/encode.h>
+#include <jxl/encode_cxx.h>
+#include <jxl/resizable_parallel_runner.h>
+#include <jxl/resizable_parallel_runner_cxx.h>
+#include <jxl/thread_parallel_runner.h>
+#include <jxl/thread_parallel_runner_cxx.h>
+#include <jxl/types.h>
+
+static HMODULE hModJXL          = nullptr;
+static HMODULE hModJXLCMS       = nullptr;
+static HMODULE hModJXLThreads   = nullptr;
+static HMODULE hModBrotliCommon = nullptr;
+static HMODULE hModBrotliDec    = nullptr;
+static HMODULE hModBrotliEnc    = nullptr;
+
+bool isJXLEncoderAvailable (void)
+{
+  SK_RunOnce (
+  {
+    static const wchar_t* wszPluginArch =
+      SK_RunLHIfBitness ( 64, LR"(x64\)",
+                              LR"(x86\)" );
+
+    std::filesystem::path path_to_codecs =
+      SK_GetPlugInDirectory (SK_PlugIn_Type::ThirdParty);
+
+    std::error_code                              ec;
+    if (std::filesystem::exists (path_to_codecs, ec))
+    {
+      path_to_codecs /= LR"(Image Codecs\libjxl)";
+      path_to_codecs /= wszPluginArch;
+
+      std::filesystem::create_directories
+                                  (path_to_codecs, ec);
+      if (std::filesystem::exists (path_to_codecs, ec))
+      {
+        std::filesystem::path path_to_brotlicommon = path_to_codecs / L"brotlicommon.dll";
+        std::filesystem::path path_to_brotlidec    = path_to_codecs / L"brotlidec.dll";
+        std::filesystem::path path_to_brotlienc    = path_to_codecs / L"brotlienc.dll";
+        std::filesystem::path path_to_jxl_threads  = path_to_codecs / L"jxl_threads.dll";
+        std::filesystem::path path_to_jxl_cms      = path_to_codecs / L"jxl_cms.dll";
+        std::filesystem::path path_to_jxl_dec      = path_to_codecs / L"jxl_dec.dll";
+        std::filesystem::path path_to_jxl          = path_to_codecs / L"jxl.dll";
+
+        // JXL depends on CMS to be loaded first
+
+        hModBrotliCommon = LoadLibraryW (path_to_brotlicommon.c_str ());
+        hModBrotliEnc    = LoadLibraryW (path_to_brotlienc.   c_str ());
+        hModBrotliDec    = LoadLibraryW (path_to_brotlidec.   c_str ());
+        hModJXLThreads   = LoadLibraryW (path_to_jxl_threads. c_str ());
+        hModJXLCMS       = LoadLibraryW (path_to_jxl_cms.     c_str ());
+        hModJXL          = LoadLibraryW (path_to_jxl.         c_str ());
+
+        if ( hModJXL          != nullptr &&
+             hModJXLCMS       != nullptr &&
+             hModJXLThreads   != nullptr &&
+             hModBrotliCommon != nullptr &&
+             hModBrotliEnc    != nullptr &&
+             hModBrotliDec    != nullptr )
+        {
+          //SK_LOGi0 ("Loaded JPEG XL DLLs from: %ws", path_to_sk.c_str ());
+          return true;
+        }
+      }
+    }
+
+    if (hModBrotliCommon == nullptr) hModBrotliCommon = LoadLibraryW (L"brotlicommon.dll");
+    if (hModBrotliEnc    == nullptr) hModBrotliEnc    = LoadLibraryW (L"brotlienc.dll");
+    if (hModBrotliDec    == nullptr) hModBrotliDec    = LoadLibraryW (L"brotlidec.dll");
+    if (hModJXLThreads   == nullptr) hModJXLThreads   = LoadLibraryW (L"jxl_threads.dll");
+    if (hModJXLCMS       == nullptr) hModJXLCMS       = LoadLibraryW (L"jxl_cms.dll");
+    if (hModJXL          == nullptr) hModJXL          = LoadLibraryW (L"jxl.dll");
+
+    if ( hModJXL          != nullptr &&
+         hModJXLCMS       != nullptr &&
+         hModJXLThreads   != nullptr &&
+         hModBrotliCommon != nullptr &&
+         hModBrotliEnc    != nullptr &&
+         hModBrotliDec    != nullptr )
+    {
+      //SK_LOGi0 ("Loaded JPEG XL DLLs from default DLL search path");
+      return true;
+    }
+  });
+
+  const bool supported =
+    ( hModJXL          != nullptr &&
+      hModJXLThreads   != nullptr &&
+      hModJXLCMS       != nullptr && 
+      hModBrotliCommon != nullptr &&
+      hModBrotliEnc    != nullptr &&
+      hModBrotliDec    != nullptr );
+
+  return supported;
+}
+
+bool
+SK_Screenshot_SaveJXL (DirectX::ScratchImage &src_image, const wchar_t *wszFilePath)
+{
+  extern bool isJXLEncoderAvailable (void);
+  if (!       isJXLEncoderAvailable ())
+    return false;
+
+  using JxlEncoderCreate_pfn                               = JxlEncoder*              (*)(const JxlMemoryManager* memory_manager);
+  using JxlEncoderDestroy_pfn                              = void                     (*)(JxlEncoder* enc);
+  using JxlEncoderCloseInput_pfn                           = void                     (*)(JxlEncoder* enc);
+  using JxlEncoderProcessOutput_pfn                        = JxlEncoderStatus         (*)(JxlEncoder* enc, uint8_t** next_out, size_t* avail_out);
+  using JxlEncoderFrameSettingsCreate_pfn                  = JxlEncoderFrameSettings* (*)(JxlEncoder* enc, const JxlEncoderFrameSettings* source);
+  using JxlEncoderInitBasicInfo_pfn                        = void                     (*)(JxlBasicInfo* info);
+  using JxlEncoderSetBasicInfo_pfn                         = JxlEncoderStatus         (*)(JxlEncoder* enc, const JxlBasicInfo* info);
+  using JxlEncoderAddImageFrame_pfn                        = JxlEncoderStatus         (*)(const JxlEncoderFrameSettings* frame_settings, const JxlPixelFormat* pixel_format, const void* buffer, size_t size);
+  using JxlEncoderSetColorEncoding_pfn                     = JxlEncoderStatus         (*)(JxlEncoder* enc, const JxlColorEncoding* color);
+  using JxlEncoderFrameSettingsSetOption_pfn               = JxlEncoderStatus         (*)(JxlEncoderFrameSettings *frame_settings, JxlEncoderFrameSettingId option, int64_t value);
+  using JxlEncoderSetParallelRunner_pfn                    = JxlEncoderStatus         (*)(JxlEncoder* enc, JxlParallelRunner parallel_runner, void* parallel_runner_opaque);
+
+  using JxlThreadParallelRunner_pfn                        = JxlParallelRetCode       (*)(void* runner_opaque, void* jpegxl_opaque, JxlParallelRunInit init, JxlParallelRunFunction func, uint32_t start_range, uint32_t end_range);
+  using JxlThreadParallelRunnerCreate_pfn                  = void*                    (*)(const JxlMemoryManager* memory_manager, size_t num_worker_threads);
+  using JxlThreadParallelRunnerDestroy_pfn                 = void                     (*)(void* runner_opaque);
+  using JxlThreadParallelRunnerDefaultNumWorkerThreads_pfn = size_t                   (*)(void);
+
+  static JxlEncoderCreate_pfn                 jxlEncoderCreate                 = (JxlEncoderCreate_pfn)                GetProcAddress (hModJXL, "JxlEncoderCreate");
+  static JxlEncoderDestroy_pfn                jxlEncoderDestroy                = (JxlEncoderDestroy_pfn)               GetProcAddress (hModJXL, "JxlEncoderDestroy");
+  static JxlEncoderCloseInput_pfn             jxlEncoderCloseInput             = (JxlEncoderCloseInput_pfn)            GetProcAddress (hModJXL, "JxlEncoderCloseInput");
+  static JxlEncoderProcessOutput_pfn          jxlEncoderProcessOutput          = (JxlEncoderProcessOutput_pfn)         GetProcAddress (hModJXL, "JxlEncoderProcessOutput");
+  static JxlEncoderFrameSettingsCreate_pfn    jxlEncoderFrameSettingsCreate    = (JxlEncoderFrameSettingsCreate_pfn)   GetProcAddress (hModJXL, "JxlEncoderFrameSettingsCreate");
+  static JxlEncoderInitBasicInfo_pfn          jxlEncoderInitBasicInfo          = (JxlEncoderInitBasicInfo_pfn)         GetProcAddress (hModJXL, "JxlEncoderInitBasicInfo");
+  static JxlEncoderSetBasicInfo_pfn           jxlEncoderSetBasicInfo           = (JxlEncoderSetBasicInfo_pfn)          GetProcAddress (hModJXL, "JxlEncoderSetBasicInfo");
+  static JxlEncoderAddImageFrame_pfn          jxlEncoderAddImageFrame          = (JxlEncoderAddImageFrame_pfn)         GetProcAddress (hModJXL, "JxlEncoderAddImageFrame");
+  static JxlEncoderSetColorEncoding_pfn       jxlEncoderSetColorEncoding       = (JxlEncoderSetColorEncoding_pfn)      GetProcAddress (hModJXL, "JxlEncoderSetColorEncoding");
+  static JxlEncoderFrameSettingsSetOption_pfn jxlEncoderFrameSettingsSetOption = (JxlEncoderFrameSettingsSetOption_pfn)GetProcAddress (hModJXL, "JxlEncoderFrameSettingsSetOption");
+  static JxlEncoderSetParallelRunner_pfn      jxlEncoderSetParallelRunner      = (JxlEncoderSetParallelRunner_pfn)     GetProcAddress (hModJXL, "JxlEncoderSetParallelRunner");
+
+  static JxlThreadParallelRunner_pfn                        jxlThreadParallelRunner                        = (JxlThreadParallelRunner_pfn)                       GetProcAddress (hModJXLThreads, "JxlThreadParallelRunner");
+  static JxlThreadParallelRunnerCreate_pfn                  jxlThreadParallelRunnerCreate                  = (JxlThreadParallelRunnerCreate_pfn)                 GetProcAddress (hModJXLThreads, "JxlThreadParallelRunnerCreate");
+  static JxlThreadParallelRunnerDestroy_pfn                 jxlThreadParallelRunnerDestroy                 = (JxlThreadParallelRunnerDestroy_pfn)                GetProcAddress (hModJXLThreads, "JxlThreadParallelRunnerDestroy");
+  static JxlThreadParallelRunnerDefaultNumWorkerThreads_pfn jxlThreadParallelRunnerDefaultNumWorkerThreads = (JxlThreadParallelRunnerDefaultNumWorkerThreads_pfn)GetProcAddress (hModJXLThreads, "JxlThreadParallelRunnerDefaultNumWorkerThreads");
+
+  using JxlEncoderSetFrameLossless_pfn    = JxlEncoderStatus (*)(JxlEncoderFrameSettings *frame_settings, JXL_BOOL lossless);
+  using JxlEncoderSetFrameDistance_pfn    = JxlEncoderStatus (*)(JxlEncoderFrameSettings *frame_settings, float distance);
+  using JxlEncoderSetFrameBitDepth_pfn    = JxlEncoderStatus (*)(JxlEncoderFrameSettings *frame_settings, const JxlBitDepth *bit_depth);
+  using JxlEncoderDistanceFromQuality_pfn = float            (*)(float quality);
+
+  static JxlEncoderSetFrameLossless_pfn    jxlEncoderSetFrameLossless    = (JxlEncoderSetFrameLossless_pfn)   GetProcAddress (hModJXL, "JxlEncoderSetFrameLossless");  
+  static JxlEncoderSetFrameDistance_pfn    jxlEncoderSetFrameDistance    = (JxlEncoderSetFrameDistance_pfn)   GetProcAddress (hModJXL, "JxlEncoderSetFrameDistance");    
+  static JxlEncoderSetFrameBitDepth_pfn    jxlEncoderSetFrameBitDepth    = (JxlEncoderSetFrameBitDepth_pfn)   GetProcAddress (hModJXL, "JxlEncoderSetFrameBitDepth");  
+  static JxlEncoderDistanceFromQuality_pfn jxlEncoderDistanceFromQuality = (JxlEncoderDistanceFromQuality_pfn)GetProcAddress (hModJXL, "JxlEncoderDistanceFromQuality");
+
+  bool succeeded = false;
+
+  if ( jxlEncoderCreate                               == nullptr ||
+       jxlThreadParallelRunnerCreate                  == nullptr ||
+       jxlThreadParallelRunnerDefaultNumWorkerThreads == nullptr )
+  {
+    SK_LOGi0 (L"JPEG XL library unavailable");
+    return false;//E_NOINTERFACE;
+  }
+
+         auto  jxl_encoder = jxlEncoderCreate              (nullptr);
+  static void* jxl_runner  = jxlThreadParallelRunnerCreate (nullptr, config.screenshots.avif.max_threads);
+  // Keep max thread count low, or it will hitch...
+
+  for (;;)
+  {
+    if ( jxl_encoder == nullptr ||
+         jxl_runner  == nullptr )
+      break;
+
+    const DirectX::Image& image =
+      *src_image.GetImages ();
+    
+    if ( JXL_ENC_SUCCESS !=
+           jxlEncoderSetParallelRunner ( jxl_encoder,
+                                           jxlThreadParallelRunner,
+                                             jxl_runner ) )
+    {
+      SK_LOGi0 (L"JxlEncoderSetParallelRunner failed");
+      break;
+    }
+
+    float compression_quality =
+      std::min (100.0f, static_cast <float> (config.screenshots.compression_quality) + 0.75f);
+
+    const bool bLossless =
+      (compression_quality == 100.0f);
+
+    JxlDataType type;
+    size_t      size = sizeof (uint16_t);
+
+    switch (image.format)
+    {
+      default:
+      case DXGI_FORMAT_R16G16B16A16_UNORM: type = JXL_TYPE_FLOAT16; break;
+      case DXGI_FORMAT_R10G10B10A2_UNORM:  type = JXL_TYPE_UINT16;  break;
+    }
+
+    std::vector <uint16_t> rgb16_pixels (image.width * image.height * 3);
+
+    auto rgb16_pixel =
+      rgb16_pixels.begin ();
+
+    EvaluateImage ( image,
+      [&](const XMVECTOR* pixels, size_t width, size_t y)
+      {
+        using namespace DirectX::PackedVector;
+
+        UNREFERENCED_PARAMETER(y);
+
+        if (image.format == DXGI_FORMAT_R10G10B10A2_UNORM)
+        {
+          for (size_t j = 0; j < width; ++j)
+          {
+            XMVECTOR v = *pixels++;
+
+            *rgb16_pixel++ = static_cast <uint16_t> (std::min (65535ui32, (uint32_t)(XMVectorGetX (v) * 65536.0f)));
+            *rgb16_pixel++ = static_cast <uint16_t> (std::min (65535ui32, (uint32_t)(XMVectorGetY (v) * 65536.0f)));
+            *rgb16_pixel++ = static_cast <uint16_t> (std::min (65535ui32, (uint32_t)(XMVectorGetZ (v) * 65536.0f)));
+          }
+        }
+
+        else
+        {
+          for (size_t j = 0; j < width; ++j)
+          {
+            XMHALF4 half4 (pixels++->m128_f32);
+
+            *rgb16_pixel++ = half4.x;
+            *rgb16_pixel++ = half4.y;
+            *rgb16_pixel++ = half4.z;
+          }
+        }
+      }
+    );
+
+    JxlPixelFormat pixel_format =
+      { 3, type, JXL_NATIVE_ENDIAN, 0 };
+
+    JxlBasicInfo              basic_info = { };
+    jxlEncoderInitBasicInfo (&basic_info);
+
+    basic_info.xsize                 = static_cast <uint32_t> (image.width);
+    basic_info.ysize                 = static_cast <uint32_t> (image.height);
+    basic_info.uses_original_profile = bLossless ? JXL_TRUE : JXL_FALSE;
+
+    switch (image.format)
+    {
+      case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        basic_info.bits_per_sample          = 16;
+        basic_info.exponent_bits_per_sample =  5;
+        break;
+      case DXGI_FORMAT_R10G10B10A2_UNORM:
+        basic_info.bits_per_sample          = 10;
+        basic_info.exponent_bits_per_sample =  0;
+        break;
+      default:
+        basic_info.bits_per_sample          = static_cast <uint32_t> (DirectX::BitsPerColor (image.format));
+        basic_info.exponent_bits_per_sample =                         DirectX::BitsPerColor (image.format) == 32 ? 8 : 5;
+        break;
+    }
+
+    if ( JXL_ENC_SUCCESS !=
+           jxlEncoderSetBasicInfo (jxl_encoder, &basic_info) )
+    {
+      SK_LOGi0 (L"JxlEncoderSetBasicInfo failed");
+      break;
+    }
+
+    JxlColorEncoding color_encoding = { };
+
+    color_encoding.color_space      = JXL_COLOR_SPACE_RGB;
+    color_encoding.white_point      = JXL_WHITE_POINT_D65;
+    color_encoding.rendering_intent = JXL_RENDERING_INTENT_PERCEPTUAL;
+
+    switch (image.format)
+    {
+      default:
+      case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        color_encoding.primaries         = JXL_PRIMARIES_SRGB;
+        color_encoding.transfer_function = JXL_TRANSFER_FUNCTION_LINEAR;
+        break;
+      case DXGI_FORMAT_R10G10B10A2_UNORM:
+        color_encoding.primaries         = JXL_PRIMARIES_2100;
+        color_encoding.transfer_function = JXL_TRANSFER_FUNCTION_PQ;
+        break;
+    }
+
+    if ( JXL_ENC_SUCCESS !=
+           jxlEncoderSetColorEncoding (jxl_encoder, &color_encoding) )
+    {
+      SK_LOGi0 (L"JxlEncoderSetColorEncoding failed");
+      break;
+    }
+
+    JxlEncoderFrameSettings* frame_settings =
+      jxlEncoderFrameSettingsCreate (jxl_encoder, nullptr);
+
+    jxlEncoderSetFrameLossless       (frame_settings, bLossless ? JXL_TRUE : JXL_FALSE);
+    jxlEncoderSetFrameDistance       (frame_settings, jxlEncoderDistanceFromQuality (compression_quality));
+    jxlEncoderFrameSettingsSetOption (frame_settings, JXL_ENC_FRAME_SETTING_EFFORT, 7);
+
+    if ( JXL_ENC_SUCCESS !=
+           jxlEncoderAddImageFrame ( frame_settings, &pixel_format,
+             static_cast <const void *> (rgb16_pixels.data ()),
+                                  size * rgb16_pixels.size () ) )
+    {
+      SK_LOGi0 (L"JxlEncoderAddImageFrame failed");
+      break;
+    }
+
+    jxlEncoderCloseInput (jxl_encoder);
+
+    std::vector <uint8_t> output (65536);
+
+    uint8_t* next_out  = output.data ();
+    size_t   avail_out = output.size () - (next_out - output.data ());
+
+    JxlEncoderStatus
+           process_result  = JXL_ENC_NEED_MORE_OUTPUT;
+    while (process_result == JXL_ENC_NEED_MORE_OUTPUT)
+    {
+      process_result =
+        jxlEncoderProcessOutput (jxl_encoder, &next_out, &avail_out);
+
+      if (process_result == JXL_ENC_NEED_MORE_OUTPUT)
+      {
+        size_t offset = next_out - output.data ();
+
+        output.resize (output.size () * 2);
+
+        next_out  = output.data () + offset;
+        avail_out = output.size () - offset;
+      }
+    }
+
+    size_t output_size =
+      (next_out - output.data ());
+
+    if (JXL_ENC_SUCCESS != process_result)
+    {
+      SK_LOGi0 (L"JxlEncoderProcessOutput failed");
+      break;
+    }
+
+    wchar_t    wszJXLPath [MAX_PATH + 2] = { };
+    wcsncpy_s (wszJXLPath, wszFilePath, MAX_PATH);
+
+    PathRemoveExtensionW (wszJXLPath);
+    PathAddExtensionW    (wszJXLPath, L".jxl");
+
+    FILE* fOutput =
+      _wfopen (wszJXLPath, L"wb");
+
+    if (fOutput != nullptr)
+    {
+      fwrite (output.data (), output_size, 1, fOutput);
+      fclose (fOutput);
+
+      SK_LOGi1 (L"JPEG XL Encode Finished");
+
+      succeeded = true;
+    }
+
+    break;
+  }
+
+  if (jxl_encoder != nullptr)
+    jxlEncoderDestroy (jxl_encoder);
+
+  //if (jxl_runner != nullptr)
+  //  jxlThreadParallelRunnerDestroy (jxl_runner);
+
+  return
+    succeeded;
 }
 
 void
@@ -1271,16 +1573,26 @@ constexpr uint8_t PNG_COMPRESSION_TYPE_BASE = 0; /* Deflate method 8, 32K window
 //  (6) Add cHRM  [Unnecessary, but probably a good idea]
 //
 
+#if (defined _M_IX86) || (defined _M_X64)
+# define SK_PNG_GetUint32(x)                    _byteswap_ulong (x)
+# define SK_PNG_SetUint32(x,y)              x = _byteswap_ulong (y)
+# define SK_PNG_DeclareUint32(x,y) uint32_t x = SK_PNG_SetUint32((x),(y))
+#else
+# define SK_PNG_GetUint32(x)                    (x)
+# define SK_PNG_SetUint32(x,y)              x = (y)
+# define SK_PNG_DeclareUint32(x,y) uint32_t x = SK_PNG_SetUint32((x),(y))
+#endif
+
 struct SK_PNG_HDR_cHRM_Payload
 {
-  uint32_t white_x = 31270;
-  uint32_t white_y = 32900;
-  uint32_t red_x   = 70800;
-  uint32_t red_y   = 29200;
-  uint32_t green_x = 17000;
-  uint32_t green_y = 79700;
-  uint32_t blue_x  = 13100;
-  uint32_t blue_y  = 04600;
+  SK_PNG_DeclareUint32 (white_x, 31270);
+  SK_PNG_DeclareUint32 (white_y, 32900);
+  SK_PNG_DeclareUint32 (red_x,   70800);
+  SK_PNG_DeclareUint32 (red_y,   29200);
+  SK_PNG_DeclareUint32 (green_x, 17000);
+  SK_PNG_DeclareUint32 (green_y, 79700);
+  SK_PNG_DeclareUint32 (blue_x,  13100);
+  SK_PNG_DeclareUint32 (blue_y,  04600);
 };
 
 struct SK_PNG_HDR_sBIT_Payload
@@ -1293,30 +1605,30 @@ struct SK_PNG_HDR_sBIT_Payload
 struct SK_PNG_HDR_mDCv_Payload
 {
   struct {
-    uint32_t red_x   = 35400; // 0.708 / 0.00002
-    uint32_t red_y   = 14600; // 0.292 / 0.00002
-    uint32_t green_x =  8500; // 0.17  / 0.00002
-    uint32_t green_y = 39850; // 0.797 / 0.00002
-    uint32_t blue_x  =  6550; // 0.131 / 0.00002
-    uint32_t blue_y  =  2300; // 0.046 / 0.00002
+    SK_PNG_DeclareUint32 (red_x,   35400); // 0.708 / 0.00002
+    SK_PNG_DeclareUint32 (red_y,   14600); // 0.292 / 0.00002
+    SK_PNG_DeclareUint32 (green_x,  8500); // 0.17  / 0.00002
+    SK_PNG_DeclareUint32 (green_y, 39850); // 0.797 / 0.00002
+    SK_PNG_DeclareUint32 (blue_x,   6550); // 0.131 / 0.00002
+    SK_PNG_DeclareUint32 (blue_y,   2300); // 0.046 / 0.00002
   } primaries;
 
   struct {
-    uint32_t x       = 15635; // 0.3127 / 0.00002
-    uint32_t y       = 16450; // 0.3290 / 0.00002
+    SK_PNG_DeclareUint32 (x, 15635); // 0.3127 / 0.00002
+    SK_PNG_DeclareUint32 (y, 16450); // 0.3290 / 0.00002
   } white_point;
 
   // The only real data we need to fill-in
   struct {
-    uint32_t maximum = 10000000; // 1000.0 cd/m^2
-    uint32_t minimum = 1;        // 0.0001 cd/m^2
+    SK_PNG_DeclareUint32 (maximum, 10000000); // 1000.0 cd/m^2
+    SK_PNG_DeclareUint32 (minimum, 1);        // 0.0001 cd/m^2
   } luminance;
 };
 
 struct SK_PNG_HDR_cLLi_Payload
 {
-  uint32_t max_cll  = 10000000; // 1000 / 0.0001
-  uint32_t max_fall =  2500000; //  250 / 0.0001
+  SK_PNG_DeclareUint32 (max_cll,  10000000); // 1000 / 0.0001
+  SK_PNG_DeclareUint32 (max_fall,  2500000); //  250 / 0.0001
 };
 
 //
@@ -1561,33 +1873,10 @@ SK_HDR_CalculateContentLightInfo (const DirectX::Image& img)
 {
   SK_PNG_HDR_cLLi_Payload clli;
 
-  static const XMMATRIX c_from709to2020 =
-  {
-    0.627225305694944f,  0.0690418812810714f, 0.0163911702607078f, 0.0f,
-    0.329476882715808f,  0.919605681354755f,  0.0880887513437058f, 0.0f,
-    0.0432978115892484f, 0.0113524373641739f, 0.895520078395586f,  0.0f,
-    0.0f,                0.0f,                0.0f,                1.0f
-  };
-
-  static const XMMATRIX c_from709toXYZ =
-  {
-    0.4123907983303070068359375f,  0.2126390039920806884765625f,   0.0193308182060718536376953125f, 0.0f,
-    0.3575843274593353271484375f,  0.715168654918670654296875f,    0.119194783270359039306640625f,  0.0f,
-    0.18048079311847686767578125f, 0.072192318737506866455078125f, 0.950532138347625732421875f,     0.0f,
-    0.0f,                          0.0f,                           0.0f,                            1.0f
-  };
-
-  static const XMMATRIX c_from2020toXYZ =
-  {
-    0.636958062f, 0.2627002000f, 0.0000000000f, 0.0f,
-    0.144616901f, 0.6779980650f, 0.0280726924f, 0.0f,
-    0.168880969f, 0.0593017153f, 1.0609850800f, 0.0f,
-    0.0f,         0.0f,          0.0f,          1.0f
-  };
-
-  float N         = 0.0f;
-  float fLumAccum = 0.0f;
-  XMVECTOR vMaxLum = g_XMZero;
+  float N         =       0.0f;
+  float fLumAccum =       0.0f;
+  float fMaxLum   =       0.0f;
+  float fMinLum   = 5240320.0f;
 
   EvaluateImage ( img,
     [&](const XMVECTOR* pixels, size_t width, size_t y)
@@ -1610,10 +1899,16 @@ SK_HDR_CalculateContentLightInfo (const DirectX::Image& img)
                 PQToLinear (XMVectorSaturate (v)), c_from2020toXYZ
               );
 
-            vMaxLum =
-              XMVectorMax (vMaxLum, v);
+            const float fLum =
+              XMVectorGetY (v);
 
-            fScanlineLum += XMVectorGetY (v);
+            fMaxLum =
+              std::max (fMaxLum, fLum);
+
+            fMinLum =
+              std::min (fMinLum, fLum);
+
+            fScanlineLum += fLum;
           }
         } break;
 
@@ -1628,15 +1923,20 @@ SK_HDR_CalculateContentLightInfo (const DirectX::Image& img)
             v =
               XMVector3Transform (v, c_from709toXYZ);
 
-            vMaxLum =
-              XMVectorMax (vMaxLum, v);
+            const float fLum =
+              XMVectorGetY (v);
 
-            fScanlineLum += XMVectorGetY (v);
+            fMaxLum =
+              std::max (fMaxLum, fLum);
+
+            fMinLum =
+              std::min (fMinLum, fLum);
+
+            fScanlineLum += fLum;
           }
         } break;
 
         default:
-          SK_ReleaseAssert (!"Unsupported CLLI input format");
           break;
       }
 
@@ -1648,10 +1948,59 @@ SK_HDR_CalculateContentLightInfo (const DirectX::Image& img)
 
   if (N > 0.0)
   {
-    clli.max_cll  =
-      static_cast <uint32_t> (round ((80.0f * XMVectorGetY (vMaxLum)) / 0.0001f));
-    clli.max_fall = 
-      static_cast <uint32_t> (round ((80.0f * (fLumAccum / N))        / 0.0001f));
+    // 0 nits - 10k nits (appropriate for screencap, but not HDR photography)
+    fMinLum = std::clamp (fMinLum, 0.0f,    125.0f);
+    fMaxLum = std::clamp (fMaxLum, fMinLum, 125.0f);
+
+    const float fLumRange =
+            (fMaxLum - fMinLum);
+
+    auto        luminance_freq = std::make_unique <uint32_t []> (65536);
+    ZeroMemory (luminance_freq.get (),     sizeof (uint32_t)  *  65536);
+
+    EvaluateImage ( img,
+    [&](const XMVECTOR* pixels, size_t width, size_t y)
+    {
+      UNREFERENCED_PARAMETER(y);
+
+      for (size_t j = 0; j < width; ++j)
+      {
+        XMVECTOR v = *pixels++;
+
+        v =
+          XMVector3Transform (v, c_from709toXYZ);
+
+        luminance_freq [
+          std::clamp ( (int)
+            std::roundf (
+              (XMVectorGetY (v) - fMinLum)     /
+                                    (fLumRange / 65536.0f) ),
+                                              0, 65535 ) ]++;
+      }
+    });
+
+          double percent  = 100.0;
+    const double img_size = (double)img.width *
+                            (double)img.height;
+
+    for (auto i = 65535; i >= 0; --i)
+    {
+      percent -=
+        100.0 * ((double)luminance_freq [i] / img_size);
+
+      if (percent <= 99.975)
+      {
+        fMaxLum =
+          fMinLum + (fLumRange * ((float)i / 65536.0f));
+
+        break;
+      }
+    }
+
+    SK_PNG_SetUint32 (clli.max_cll,
+      static_cast <uint32_t> ((80.0f *          fMaxLum) / 0.0001f));
+    SK_PNG_SetUint32 (clli.max_fall,
+      static_cast <uint32_t> ((80.0f * (fLumAccum / N))  / 0.0001f));
   }
 
   return clli;
@@ -1736,6 +2085,10 @@ SK_PNG_MakeHDR ( const wchar_t*        wszFilePath,
           crc =
             png_crc32 (data, 0, _native_len, png_crc32 (name, 0, 4, 0x0));
 
+#if (defined _M_IX86) || (defined _M_X64)
+          crc = _byteswap_ulong (crc);
+#endif
+
           fwrite (&len, 8,           1, fStream);
           fwrite (data, _native_len, 1, fStream);
           fwrite (&crc, 4,           1, fStream);
@@ -1777,30 +2130,30 @@ SK_PNG_MakeHDR ( const wchar_t*        wszFilePath,
       auto& active_display =
         rb.displays [rb.active_display];
 
-      mdcv_data.luminance.minimum =
-        static_cast <uint32_t> (round (active_display.gamut.minY / 0.0001f));
-      mdcv_data.luminance.maximum =
-        static_cast <uint32_t> (round (active_display.gamut.maxY / 0.0001f));
+      SK_PNG_SetUint32 (mdcv_data.luminance.minimum,
+        static_cast <uint32_t> (round (active_display.gamut.minY / 0.0001f)));
+      SK_PNG_SetUint32 (mdcv_data.luminance.maximum,
+        static_cast <uint32_t> (round (active_display.gamut.maxY / 0.0001f)));
 
-      mdcv_data.primaries.red_x =
-        static_cast <uint32_t> (round (active_display.gamut.xr / 0.00002));
-      mdcv_data.primaries.red_y =
-        static_cast <uint32_t> (round (active_display.gamut.yr / 0.00002));
+      SK_PNG_SetUint32 (mdcv_data.primaries.red_x,
+        static_cast <uint32_t> (round (active_display.gamut.xr / 0.00002)));
+      SK_PNG_SetUint32 (mdcv_data.primaries.red_y,
+        static_cast <uint32_t> (round (active_display.gamut.yr / 0.00002)));
 
-      mdcv_data.primaries.green_x =
-        static_cast <uint32_t> (round (active_display.gamut.xg / 0.00002));
-      mdcv_data.primaries.green_y =
-        static_cast <uint32_t> (round (active_display.gamut.yg / 0.00002));
+      SK_PNG_SetUint32 (mdcv_data.primaries.green_x,
+        static_cast <uint32_t> (round (active_display.gamut.xg / 0.00002)));
+      SK_PNG_SetUint32 (mdcv_data.primaries.green_y,
+        static_cast <uint32_t> (round (active_display.gamut.yg / 0.00002)));
 
-      mdcv_data.primaries.blue_x =
-        static_cast <uint32_t> (round (active_display.gamut.xb / 0.00002));
-      mdcv_data.primaries.blue_y =
-        static_cast <uint32_t> (round (active_display.gamut.yb / 0.00002));
+      SK_PNG_SetUint32 (mdcv_data.primaries.blue_x,
+        static_cast <uint32_t> (round (active_display.gamut.xb / 0.00002)));
+      SK_PNG_SetUint32 (mdcv_data.primaries.blue_y,
+        static_cast <uint32_t> (round (active_display.gamut.yb / 0.00002)));
 
-      mdcv_data.white_point.x =
-        static_cast <uint32_t> (round (active_display.gamut.Xw / 0.00002));
-      mdcv_data.white_point.y =
-        static_cast <uint32_t> (round (active_display.gamut.Yw / 0.00002));
+      SK_PNG_SetUint32 (mdcv_data.white_point.x,
+        static_cast <uint32_t> (round (active_display.gamut.Xw / 0.00002)));
+      SK_PNG_SetUint32 (mdcv_data.white_point.y,
+        static_cast <uint32_t> (round (active_display.gamut.Yw / 0.00002)));
 
       SK_PNG_Chunk iccp_chunk = { sizeof (SK_PNG_HDR_iCCP_Payload), { 'i','C','C','P' }, &iccp_data };
       SK_PNG_Chunk cicp_chunk = { sizeof (cicp_data),               { 'c','I','C','P' }, &cicp_data };
@@ -1831,11 +2184,11 @@ SK_PNG_MakeHDR ( const wchar_t*        wszFilePath,
 
       SK_LOGi1 (L"Applied HDR10 PNG chunks to %ws.", wszFilePath);
       SK_LOGi1 (L" >> MaxCLL: %.6f nits, MaxFALL: %.6f nits",
-                static_cast <double> (clli_data.max_cll)  * 0.0001,
-                static_cast <double> (clli_data.max_fall) * 0.0001);
+                static_cast <double> (SK_PNG_GetUint32 (clli_data.max_cll))  * 0.0001,
+                static_cast <double> (SK_PNG_GetUint32 (clli_data.max_fall)) * 0.0001);
       SK_LOGi1 (L" >> Mastering Display Min/Max Luminance: %.6f/%.6f nits",
-                static_cast <double> (mdcv_data.luminance.minimum) * 0.0001,
-                static_cast <double> (mdcv_data.luminance.maximum) * 0.0001);
+                static_cast <double> (SK_PNG_GetUint32 (mdcv_data.luminance.minimum)) * 0.0001,
+                static_cast <double> (SK_PNG_GetUint32 (mdcv_data.luminance.maximum)) * 0.0001);
 
       return true;
     }
@@ -1897,4 +2250,545 @@ void
 SK_ScreenshotManager::setSnipRect (const DirectX::Rect& rect)
 {
   snip_rect = rect;
+}
+
+
+void
+SK_Image_InitializeTonemap ( std::vector <parallel_tonemap_job_s>& jobs,
+                             std::vector <HANDLE>&       parallel_start,
+                             std::vector <HANDLE>&      parallel_finish )
+{
+  SK_RunOnce (
+  {
+    for ( auto i = 0; i < config.screenshots.avif.max_threads; ++i )
+    {
+      parallel_finish [i] =
+        CreateEvent (nullptr, FALSE, FALSE, nullptr);
+      parallel_start [i] =
+        CreateEvent (nullptr, FALSE, FALSE, nullptr);
+  
+      jobs [i].hCompletionEvent = parallel_finish [i];
+      jobs [i].hStartEvent      = parallel_start  [i];
+      jobs [i].job_id           =                  i;
+    }
+  });
+}
+
+void
+SK_Image_DispatchTonemapJobs (std::vector <parallel_tonemap_job_s>& jobs)
+{
+  static bool          _once = false;
+  if (! std::exchange (_once, true))
+  {
+    for (auto& job : jobs)
+    {
+      SK_Thread_CreateEx ([](LPVOID lpUser)->DWORD
+      {
+        parallel_tonemap_job_s* pJob =
+          (parallel_tonemap_job_s *)lpUser;
+
+        SetThreadPriority       (SK_GetCurrentThread (), THREAD_PRIORITY_BELOW_NORMAL);
+        SK_SetThreadDescription (SK_GetCurrentThread (),
+            SK_FormatStringW (L"[SK] Tonemap Parallel Job %d", pJob->job_id).c_str ());
+
+        HANDLE events [] =
+          { pJob->hStartEvent, __SK_DLL_TeardownEvent };
+
+        while (WaitForMultipleObjects (2, events, FALSE, INFINITE) != (WAIT_OBJECT_0 + 1))
+        {
+          auto TonemapHDR = [](float L, float Lc, float Ld) -> float
+          {
+            float a = (  Ld / pow (Lc, 2.0f));
+            float b = (1.0f / Ld);
+          
+            return
+              L * (1 + a * L) / (1 + b * L);
+          };
+
+          for (auto pixel = pJob->pFirstPixel; pixel < pJob->pLastPixel + 1; ++pixel)
+          {
+            XMVECTOR value = *pixel;
+
+            XMVECTOR ICtCp =
+              Rec709toICtCp (value);
+
+            float Y_in  = std::max (XMVectorGetX (ICtCp), 0.0f);
+            float Y_out = 1.0f;
+
+            Y_out =
+              TonemapHDR (Y_in, pJob->maxYInPQ, pJob->SDR_YInPQ);
+
+            if (Y_out + Y_in > 0.0f)
+            {
+              ICtCp.m128_f32 [0] = std::pow (XMVectorGetX (ICtCp), 1.18f);
+
+              float I0      = XMVectorGetX (ICtCp);
+              float I1      = 0.0f;
+              float I_scale = 0.0f;
+
+              ICtCp.m128_f32 [0] *=
+                std::max ((Y_out / Y_in), 0.0f);
+
+              I1 = XMVectorGetX (ICtCp);
+
+              if (I0 != 0.0f && I1 != 0.0f)
+              {
+                I_scale =
+                  std::min (I0 / I1, I1 / I0);
+              }
+
+              ICtCp.m128_f32 [1] *= I_scale;
+              ICtCp.m128_f32 [2] *= I_scale;
+            }
+
+            value =
+              ICtCptoRec709 (ICtCp);
+
+            pJob->maxTonemappedRGB =
+              XMVectorMax (pJob->maxTonemappedRGB, XMVectorMax (value, g_XMZero));
+
+            *pixel = value;
+          }
+
+          SetEvent (pJob->hCompletionEvent);
+        }
+
+        CloseHandle (pJob->hStartEvent);
+        CloseHandle (pJob->hCompletionEvent);
+
+        SK_Thread_CloseSelf ();
+
+        return 0;
+      }, nullptr, &job );
+    }
+  }
+  
+  for ( auto& job : jobs )
+    SetEvent (job.hStartEvent);
+}
+
+void
+SK_Image_EnqueueTonemapTask ( DirectX::ScratchImage&                image,
+                              std::vector <parallel_tonemap_job_s>& jobs,
+                              std::vector <DirectX::XMVECTOR>&      pixels,
+                              float                                 maxLuminance,
+                              float                                 sdrLuminance)
+{
+  for ( auto i = 0; i < config.screenshots.avif.max_threads; ++i )
+  {
+    size_t iStartRow = (image.GetMetadata ().height / config.screenshots.avif.max_threads) * i;
+    size_t iEndRow   = (image.GetMetadata ().height / config.screenshots.avif.max_threads) * (i + 1);
+    
+    jobs [i].pFirstPixel =
+      &pixels [iStartRow * image.GetMetadata ().width];
+    jobs [i].pLastPixel  =
+      &pixels [iEndRow   * image.GetMetadata ().width - 1];
+    
+    jobs [i].maxYInPQ    = maxLuminance;
+    jobs [i].SDR_YInPQ   = sdrLuminance;
+  }
+
+  EvaluateImage ( *image.GetImages (),
+    [&](const DirectX::XMVECTOR *image_pixels, size_t width, size_t y)
+    {
+      for (size_t i = 0; i < width; ++i)
+      {
+        pixels [width * y + i] = *image_pixels++;
+      }
+    }
+  );
+}
+
+void
+SK_Image_GetTonemappedPixels (DirectX::ScratchImage&           output,
+                              DirectX::ScratchImage&           source,
+                              std::vector <DirectX::XMVECTOR>& pixels,
+                              std::vector <HANDLE>&            fence)
+{
+  WaitForMultipleObjects ( config.screenshots.avif.max_threads,
+                             fence.data (), TRUE, INFINITE );
+
+  TransformImage ( *source.GetImages (),
+    [&](XMVECTOR* outPixels, const XMVECTOR* inPixels, size_t width, size_t y)
+    {
+      std::ignore = inPixels;
+
+      for (size_t j = 0; j < width; ++j)
+      {
+        outPixels [j] = pixels [width * y + j];
+      }
+    }, output);
+}
+
+
+
+
+const ParamsPQ PQ =
+{
+  DirectX::XMVectorReplicate (2610.0 / 4096.0 / 4.0),   // N
+  DirectX::XMVectorReplicate (2523.0 / 4096.0 * 128.0), // M
+  DirectX::XMVectorReplicate (3424.0 / 4096.0),         // C1
+  DirectX::XMVectorReplicate (2413.0 / 4096.0 * 32.0),  // C2
+  DirectX::XMVectorReplicate (2392.0 / 4096.0 * 32.0),  // C3
+  DirectX::XMVectorReplicate (125.0f),                  // MaxPQ
+  DirectX::XMVectorReciprocal (DirectX::XMVectorReplicate (2610.0 / 4096.0 / 4.0)),
+  DirectX::XMVectorReciprocal (DirectX::XMVectorReplicate (2523.0 / 4096.0 * 128.0)),
+};
+
+float LinearToPQY (float N)
+{
+  const float fScaledN =
+    fabs (N * 0.008f); // 0.008 = 1/125.0
+
+  float ret =
+    pow (fScaledN, 0.1593017578125f);
+
+  float nd =
+    fabs ( (0.8359375f + (18.8515625f * ret)) /
+           (1.0f       + (18.6875f    * ret)) );
+
+  return
+    pow (nd, 78.84375f);
+};
+
+DirectX::XMVECTOR Rec709toICtCp (DirectX::XMVECTOR N)
+{
+  using namespace DirectX;
+
+  static const DirectX::XMMATRIX ConvMat = // Transposed
+  {
+    0.5000f,  1.6137f,  4.3780f, 0.0f,
+    0.5000f, -3.3234f, -4.2455f, 0.0f,
+    0.0000f,  1.7097f, -0.1325f, 0.0f,
+    0.0f,     0.0f,     0.0f,    1.0f
+  };
+
+  return
+    XMVector3Transform (
+      LinearToPQ (
+        XMVectorMax (g_XMZero,
+        XMVector3Transform (
+        XMVector3Transform (N, c_from709toXYZ), c_fromXYZtoLMS)
+                 )), ConvMat
+    );
+};
+
+DirectX::XMVECTOR ICtCptoRec709 (DirectX::XMVECTOR N)
+{
+  using namespace DirectX;
+
+  static const DirectX::XMMATRIX ConvMat = // Transposed
+  {
+    1.0f,                  1.0f,                  1.0f,                 0.0f,
+    0.00860514569398152f, -0.00860514569398152f,  0.56004885956263900f, 0.0f,
+    0.11103560447547328f, -0.11103560447547328f, -0.32063747023212210f, 0.0f,
+    0.0f,                  0.0f,                  0.0f,                 1.0f
+  };
+
+  return
+    XMVector3Transform (
+    XMVector3Transform (
+      PQToLinear (XMVector3Transform (N, ConvMat)),
+        c_fromLMStoXYZ ),
+        c_fromXYZto709 );
+};
+
+#include <ultrahdr/ultrahdr_api.h>
+
+using uhdr_create_encoder_pfn                = uhdr_codec_private_t*    (*)(void);
+using uhdr_enc_set_quality_pfn               = uhdr_error_info_t        (*)(uhdr_codec_private_t* enc, int quality,           uhdr_img_label_t intent);
+using uhdr_enc_set_raw_image_pfn             = uhdr_error_info_t        (*)(uhdr_codec_private_t* enc, uhdr_raw_image_t* img, uhdr_img_label_t intent);
+using uhdr_enc_set_output_format_pfn         = uhdr_error_info_t        (*)(uhdr_codec_private_t* enc, uhdr_codec_t media_type);
+using uhdr_encode_pfn                        = uhdr_error_info_t        (*)(uhdr_codec_private_t* enc);
+using uhdr_get_encoded_stream_pfn            = uhdr_compressed_image_t* (*)(uhdr_codec_private_t* enc);
+using uhdr_release_encoder_pfn               = void                     (*)(uhdr_codec_private_t* enc);
+using uhdr_enc_set_min_max_content_boost_pfn = uhdr_error_info_t        (*)(uhdr_codec_private_t* enc, float min_boost, float max_boost);
+using uhdr_enc_set_preset_pfn                = uhdr_error_info_t        (*)(uhdr_codec_private_t* enc, uhdr_enc_preset_t preset);
+
+using is_uhdr_image_pfn                      = int                      (*)(void* data, int size);
+
+using uhdr_create_decoder_pfn                = uhdr_codec_private_t*    (*)(void);
+using uhdr_release_decoder_pfn               = void                     (*)(uhdr_codec_private_t* dec);
+using uhdr_dec_set_image_pfn                 = uhdr_error_info_t        (*)(uhdr_codec_private_t* dec, uhdr_compressed_image_t* img);
+using uhdr_dec_set_out_color_transfer_pfn    = uhdr_error_info_t        (*)(uhdr_codec_private_t* dec, uhdr_color_transfer_t ct);
+using uhdr_dec_set_out_img_format_pfn        = uhdr_error_info_t        (*)(uhdr_codec_private_t* dec, uhdr_img_fmt_t fmt);
+using uhdr_dec_set_out_max_display_boost_pfn = uhdr_error_info_t        (*)(uhdr_codec_private_t* dec, float display_boost);
+using uhdr_dec_probe_pfn                     = uhdr_error_info_t        (*)(uhdr_codec_private_t* dec);
+using uhdr_decode_pfn                        = uhdr_error_info_t        (*)(uhdr_codec_private_t* dec);
+using uhdr_get_decoded_image_pfn             = uhdr_raw_image_t*        (*)(uhdr_codec_private_t* dec);
+using uhdr_get_gain_map_image_pfn            = uhdr_raw_image_t*        (*)(uhdr_codec_private_t* dec);
+using uhdr_dec_get_gain_map_metadata_pfn     = uhdr_gainmap_metadata_t* (*)(uhdr_codec_private_t* dec);
+
+uhdr_create_encoder_pfn                sk_uhdr_create_encoder                = nullptr;
+uhdr_enc_set_quality_pfn               sk_uhdr_enc_set_quality               = nullptr;
+uhdr_enc_set_raw_image_pfn             sk_uhdr_enc_set_raw_image             = nullptr;
+uhdr_enc_set_output_format_pfn         sk_uhdr_enc_set_output_format         = nullptr;
+uhdr_encode_pfn                        sk_uhdr_encode                        = nullptr;
+uhdr_get_encoded_stream_pfn            sk_uhdr_get_encoded_stream            = nullptr;
+uhdr_release_encoder_pfn               sk_uhdr_release_encoder               = nullptr;
+uhdr_enc_set_min_max_content_boost_pfn sk_uhdr_enc_set_min_max_content_boost = nullptr;
+uhdr_enc_set_preset_pfn                sk_uhdr_enc_set_preset                = nullptr;
+
+is_uhdr_image_pfn                      sk_is_uhdr_image                      = nullptr;
+
+uhdr_create_decoder_pfn                sk_uhdr_create_decoder                = nullptr;
+uhdr_release_decoder_pfn               sk_uhdr_release_decoder               = nullptr;
+uhdr_dec_set_image_pfn                 sk_uhdr_dec_set_image                 = nullptr;
+uhdr_dec_set_out_color_transfer_pfn    sk_uhdr_dec_set_out_color_transfer    = nullptr;
+uhdr_dec_set_out_img_format_pfn        sk_uhdr_dec_set_out_img_format        = nullptr;
+uhdr_dec_set_out_max_display_boost_pfn sk_uhdr_dec_set_out_max_display_boost = nullptr;
+uhdr_dec_probe_pfn                     sk_uhdr_dec_probe                     = nullptr;
+uhdr_decode_pfn                        sk_uhdr_decode                        = nullptr;
+uhdr_get_decoded_image_pfn             sk_uhdr_get_decoded_image             = nullptr;
+uhdr_get_gain_map_image_pfn            sk_uhdr_get_gain_map_image            = nullptr;
+uhdr_dec_get_gain_map_metadata_pfn     sk_uhdr_dec_get_gain_map_metadata     = nullptr;
+
+bool isUHDREncoderAvailable (void)
+{
+  static HMODULE hModUHDR = nullptr;
+
+  static const wchar_t* wszPluginArch =
+    SK_RunLHIfBitness ( 64, LR"(x64\)",
+                            LR"(x86\)" );
+
+  SK_RunOnce (
+  {
+    std::wstring path_to_sk =
+      SK_GetInstallPath ();
+
+    std::error_code                          ec;
+    if (std::filesystem::exists (path_to_sk, ec))
+    {
+      path_to_sk += LR"(\PlugIns\ThirdParty\Image Codecs\libultrahdr\)";
+      path_to_sk += wszPluginArch;
+
+      std::filesystem::create_directories
+                                  (path_to_sk, ec);
+      if (std::filesystem::exists (path_to_sk, ec))
+      {
+        std::wstring path_to_uhdr = path_to_sk + L"uhdr.dll";
+
+        if (! std::filesystem::exists (path_to_uhdr, ec))
+        {
+          SK_Network_EnqueueDownload (
+               sk_download_request_s (
+                 path_to_uhdr.c_str (), SK_RunLHIfBitness (64,
+                   R"(https://sk-data.special-k.info/addon/ImageCodecs/libuhdr/x64/uhdr.dll)",
+                   R"(https://sk-data.special-k.info/addon/ImageCodecs/libuhdr/x86/uhdr.dll)"),
+          []( const std::vector <uint8_t>&&,
+              const std::wstring_view )
+           -> bool
+              {          
+                return false;
+              }
+            ), true
+          );
+        }
+
+        hModUHDR = LoadLibraryW (path_to_uhdr.c_str ());
+
+        if (hModUHDR != nullptr)
+        {
+          //PLOG_INFO << "Loaded Ultra HDR from: " << path_to_sk;
+        }
+      }
+    }
+
+    if (hModUHDR == nullptr)
+    {
+      hModUHDR = LoadLibraryW (L"uhdr.dll");
+
+      if (hModUHDR != nullptr)
+      {
+        //PLOG_INFO << "Loaded Ultra HDR from default DLL search path";
+      }
+    }
+
+    if (hModUHDR != nullptr)
+    {
+      sk_uhdr_create_encoder                = (uhdr_create_encoder_pfn)               GetProcAddress (hModUHDR, "uhdr_create_encoder");
+      sk_uhdr_enc_set_quality               = (uhdr_enc_set_quality_pfn)              GetProcAddress (hModUHDR, "uhdr_enc_set_quality");
+      sk_uhdr_enc_set_raw_image             = (uhdr_enc_set_raw_image_pfn)            GetProcAddress (hModUHDR, "uhdr_enc_set_raw_image");
+      sk_uhdr_enc_set_output_format         = (uhdr_enc_set_output_format_pfn)        GetProcAddress (hModUHDR, "uhdr_enc_set_output_format");
+      sk_uhdr_encode                        = (uhdr_encode_pfn)                       GetProcAddress (hModUHDR, "uhdr_encode");
+      sk_uhdr_get_encoded_stream            = (uhdr_get_encoded_stream_pfn)           GetProcAddress (hModUHDR, "uhdr_get_encoded_stream");
+      sk_uhdr_release_encoder               = (uhdr_release_encoder_pfn)              GetProcAddress (hModUHDR, "uhdr_release_encoder");
+      sk_uhdr_enc_set_min_max_content_boost = (uhdr_enc_set_min_max_content_boost_pfn)GetProcAddress (hModUHDR, "uhdr_enc_set_min_max_content_boost");
+      sk_uhdr_enc_set_preset                = (uhdr_enc_set_preset_pfn)               GetProcAddress (hModUHDR, "uhdr_enc_set_preset");
+
+      sk_is_uhdr_image                      = (is_uhdr_image_pfn)                     GetProcAddress (hModUHDR, "is_uhdr_image");
+      
+      sk_uhdr_create_decoder                = (uhdr_create_decoder_pfn)               GetProcAddress (hModUHDR, "uhdr_create_decoder");
+      sk_uhdr_release_decoder               = (uhdr_release_decoder_pfn)              GetProcAddress (hModUHDR, "uhdr_release_decoder");
+      sk_uhdr_dec_set_image                 = (uhdr_dec_set_image_pfn)                GetProcAddress (hModUHDR, "uhdr_dec_set_image");
+      sk_uhdr_dec_set_out_color_transfer    = (uhdr_dec_set_out_color_transfer_pfn)   GetProcAddress (hModUHDR, "uhdr_dec_set_out_color_transfer");
+      sk_uhdr_dec_set_out_img_format        = (uhdr_dec_set_out_img_format_pfn)       GetProcAddress (hModUHDR, "uhdr_dec_set_out_img_format");
+      sk_uhdr_dec_set_out_max_display_boost = (uhdr_dec_set_out_max_display_boost_pfn)GetProcAddress (hModUHDR, "uhdr_dec_set_out_max_display_boost");
+      sk_uhdr_dec_probe                     = (uhdr_dec_probe_pfn)                    GetProcAddress (hModUHDR, "uhdr_dec_probe");
+      sk_uhdr_decode                        = (uhdr_decode_pfn)                       GetProcAddress (hModUHDR, "uhdr_decode");
+      sk_uhdr_get_decoded_image             = (uhdr_get_decoded_image_pfn)            GetProcAddress (hModUHDR, "uhdr_get_decoded_image");
+      sk_uhdr_get_gain_map_image            = (uhdr_get_gain_map_image_pfn)           GetProcAddress (hModUHDR, "uhdr_get_gain_map_image");
+      sk_uhdr_dec_get_gain_map_metadata     = (uhdr_dec_get_gain_map_metadata_pfn)    GetProcAddress (hModUHDR, "uhdr_dec_get_gain_map_metadata");
+
+      return true;
+    }
+
+    return false;
+  });
+
+  const bool supported =
+    (hModUHDR != nullptr);
+
+  return supported;
+}
+
+void
+SK_Screenshot_SaveUHDR (const DirectX::Image& image, const DirectX::Image& sdr_image, const wchar_t* wszFileName)
+{
+  if (! isUHDREncoderAvailable ())
+    return;
+
+  uhdr_raw_image raw_hdr;
+
+  raw_hdr.fmt   = UHDR_IMG_FMT_32bppRGBA1010102;
+  raw_hdr.cg    = UHDR_CG_BT_2100;
+  raw_hdr.ct    = UHDR_CT_PQ;  
+  raw_hdr.range = UHDR_CR_FULL_RANGE;  
+  raw_hdr.w     = static_cast <unsigned int> (image.width);
+  raw_hdr.h     = static_cast <unsigned int> (image.height);
+
+  using namespace DirectX;
+
+  const
+  DirectX::Image*      pHDR10_Image;
+  DirectX::ScratchImage hdr10_image;
+  DirectX::ScratchImage  temp_image;
+
+  // Convert to HDR10
+  if (image.format == DXGI_FORMAT_R16G16B16A16_FLOAT)
+  {
+    DirectX::TransformImage (image,
+      [&](XMVECTOR* outPixels, const XMVECTOR* inPixels, size_t width, size_t y)
+      {
+        std::ignore = y;
+
+        for (size_t j = 0; j < width; ++j)
+        {
+          XMVECTOR value = inPixels [j];
+
+          outPixels [j] =
+            LinearToPQ (
+              XMVectorMax (g_XMZero, XMVector3Transform (value, c_from709to2020))
+            );
+        }
+      },temp_image
+    );
+
+    DirectX::Convert (*temp_image.GetImages (), DXGI_FORMAT_R10G10B10A2_UNORM, DirectX::TEX_FILTER_DEFAULT, 1.0f, hdr10_image);
+    pHDR10_Image = hdr10_image.GetImage (0,0,0);
+  }
+
+  else
+  {
+    pHDR10_Image = &image;
+  }
+  
+  raw_hdr.planes [UHDR_PLANE_PACKED] =                             pHDR10_Image->pixels;
+  raw_hdr.stride [UHDR_PLANE_PACKED] = static_cast <unsigned int> (pHDR10_Image->rowPitch / sizeof (uint32_t));
+
+  temp_image.Release ();
+
+  DirectX::Convert (sdr_image, DXGI_FORMAT_R8G8B8A8_UNORM, DirectX::TEX_FILTER_SRGB, 1.0f, temp_image);
+
+  uhdr_raw_image raw_sdr;
+
+  raw_sdr.fmt   = UHDR_IMG_FMT_32bppRGBA8888;
+  raw_sdr.cg    = UHDR_CG_BT_709;
+  raw_sdr.ct    = UHDR_CT_SRGB;
+  raw_sdr.range = UHDR_CR_FULL_RANGE;  
+  raw_sdr.w     = static_cast <unsigned int> (image.width);
+  raw_sdr.h     = static_cast <unsigned int> (image.height);
+
+  raw_sdr.planes [UHDR_PLANE_PACKED] =                             temp_image.GetImage (0,0,0)->pixels;
+  raw_sdr.stride [UHDR_PLANE_PACKED] = static_cast <unsigned int> (temp_image.GetImage (0,0,0)->rowPitch / sizeof (uint32_t));
+
+  auto encoder =
+    sk_uhdr_create_encoder ();
+
+  auto
+  err = sk_uhdr_enc_set_quality (encoder, 96, UHDR_BASE_IMG);
+  err = sk_uhdr_enc_set_quality (encoder, 92, UHDR_GAIN_MAP_IMG);
+
+  err = sk_uhdr_enc_set_raw_image (encoder, &raw_hdr, UHDR_HDR_IMG);
+
+  if (err.error_code != UHDR_CODEC_OK)
+    SK_LOGi0 (L"uhdr_enc_set_raw_image (...) failed: %d (%hs)", err.error_code, err.detail);
+
+  err = sk_uhdr_enc_set_raw_image (encoder, &raw_sdr, UHDR_SDR_IMG);
+
+  if (err.error_code != UHDR_CODEC_OK)
+    SK_LOGi0 (L"uhdr_enc_set_raw_image (...) failed: %d (%hs)", err.error_code, err.detail);
+
+  err = sk_uhdr_enc_set_output_format (encoder, UHDR_CODEC_JPG);
+
+  if (err.error_code != UHDR_CODEC_OK)
+    SK_LOGi0 (L"uhdr_enc_set_output_format (...) failed: %d (%hs)", err.error_code, err.detail);
+
+  err = sk_uhdr_enc_set_min_max_content_boost (encoder, 250.0f, 2500.0f);
+
+  if (err.error_code != UHDR_CODEC_OK)
+    SK_LOGi0 (L"uhdr_enc_set_min_max_content_boost (...) failed: %d (%hs)", err.error_code, err.detail);
+
+  err = sk_uhdr_enc_set_preset (encoder, UHDR_USAGE_BEST_QUALITY);
+
+  if (err.error_code != UHDR_CODEC_OK)
+    SK_LOGi0 (L"uhdr_enc_set_preset (...) failed: %d (%hs)", err.error_code, err.detail);
+
+  err = sk_uhdr_encode (encoder);
+ 
+  if (err.error_code != UHDR_CODEC_OK)
+    SK_LOGi0 (L"uhdr_encode (...) failed: %d (%hs)", err.error_code, err.detail);
+
+  auto img =
+    sk_uhdr_get_encoded_stream (encoder);
+
+  if (img != nullptr)
+  {
+    FILE* fJPEG =
+      _wfopen (wszFileName, L"wb");
+
+    if (fJPEG != nullptr)
+    {
+      fwrite (img->data, img->data_sz, 1, fJPEG);
+      fclose (                            fJPEG);
+
+      auto decoder =
+        sk_uhdr_create_decoder ();
+
+      sk_uhdr_dec_set_image (decoder, img);
+      sk_uhdr_dec_probe     (decoder);
+
+      //sk_uhdr_dec_set_out_color_transfer
+      //sk_uhdr_dec_set_out_img_format
+      //sk_uhdr_dec_set_out_max_display_boost
+      //sk_uhdr_dec_probe
+      //sk_uhdr_decode
+      //sk_uhdr_get_decoded_image
+      //sk_uhdr_get_gain_map_image (decoder)
+
+      auto metadata =
+        sk_uhdr_dec_get_gain_map_metadata (decoder);
+
+      SK_LOGi0 (L"UltraHDR Min/Max Content Boost: %fx / %fx", metadata->min_content_boost, metadata->max_content_boost);
+      SK_LOGi0 (L"UltraHDR Offset SDR/HDR:        %f / %f",   metadata->offset_sdr,        metadata->offset_hdr);
+
+  //  float gamma;             /**< Encoding Gamma of the gainmap image. */
+
+      SK_LOGi0 (L"UltraHDR Min/Max HDR Capacity:  %fx / %fx", metadata->hdr_capacity_min, metadata->hdr_capacity_max);
+
+      sk_uhdr_release_decoder (decoder);
+    }
+  }
+
+  sk_uhdr_release_encoder (encoder);
 }

@@ -53,13 +53,11 @@ SK_SendMsgShowCursor (BOOL bShow)
 {
   if (game_window.hWnd != 0 && IsWindow (game_window.hWnd))
   {
-    if (GetActiveWindow () != game_window.hWnd)
-    {
-           if (  bShow) PostMessageA (game_window.hWnd, game_window.messages [game_window.messages->ShowCursor].uiMessage, 0, 0);
-      else if (! bShow) PostMessageA (game_window.hWnd, game_window.messages [game_window.messages->HideCursor].uiMessage, 0, 0);
+         if (  bShow) PostMessageA (game_window.hWnd, game_window.messages [game_window.messages->ShowCursor].uiMessage, 0, 0);
+    else if (! bShow) PostMessageA (game_window.hWnd, game_window.messages [game_window.messages->HideCursor].uiMessage, 0, 0);
 
+    if (GetActiveWindow () != game_window.hWnd)
       return TRUE;
-    }
   }
 
   static constexpr auto          _MaxTries = 25;
@@ -79,9 +77,21 @@ HCURSOR
 WINAPI
 SK_SendMsgSetCursor (HCURSOR hCursor)
 {
-  if (GetActiveWindow () != game_window.hWnd)
+  if (game_window.hWnd != 0 && IsWindow (game_window.hWnd))
   {
-    PostMessageA (game_window.hWnd, game_window.messages [game_window.messages->SetCursorImg].uiMessage, (WPARAM)(hCursor), 0);
+    HCURSOR hLastCursor =
+      SK_GetCursor ();
+
+    if (hLastCursor == hCursor)
+      return hLastCursor;
+
+    if (GetActiveWindow () != game_window.hWnd)
+    {
+      PostMessageA ( game_window.hWnd,
+                     game_window.messages [game_window.messages->SetCursorImg].uiMessage,
+                       (WPARAM)(hCursor), 0 );
+      return hLastCursor;
+    }
   }
 
   return
@@ -1040,7 +1050,8 @@ GetPhysicalCursorPos_Detour (LPPOINT lpPoint)
   {
     if (LogicalToPhysicalPoint (0, &pt))
     {
-      *lpPoint = pt;
+      if (lpPoint != nullptr)
+         *lpPoint = pt;
 
       return TRUE;
     }
