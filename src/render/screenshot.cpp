@@ -441,7 +441,8 @@ SK_ScreenshotManager::copyToClipboard ( const DirectX::Image& image,
   {
     if (SUCCEEDED (sub_img.Initialize2D (pImg->format, snip.w, snip.h, 1, 1)))
     {
-      if (SUCCEEDED (DirectX::CopyRectangle (image, snip, *sub_img.GetImage (0,0,0), 0, 0, 0)))
+      if (SUCCEEDED (DirectX::CopyRectangle (image, snip, *sub_img.GetImage (0,0,0), DirectX::TEX_FILTER_SRGB_IN |
+                                                                                     DirectX::TEX_FILTER_SRGB_OUT, 0, 0)))
       {
         pImg =
           sub_img.GetImages ();
@@ -1988,7 +1989,7 @@ SK_HDR_CalculateContentLightInfo (const DirectX::Image& img)
       percent -=
         100.0 * ((double)luminance_freq [i] / img_size);
 
-      if (percent <= 99.975)
+      if (percent <= 99.5)
       {
         fMaxLum =
           fMinLum + (fLumRange * ((float)i / 65536.0f));

@@ -21,6 +21,11 @@
 
 #include <SpecialK/stdafx.h>
 
+#ifdef  __SK_SUBSYSTEM__
+#undef  __SK_SUBSYSTEM__
+#endif
+#define __SK_SUBSYSTEM__ L"Misc. Util"
+
 int
 SK_MessageBox (std::wstring caption, std::wstring title, uint32_t flags)
 {
@@ -1907,6 +1912,19 @@ SK_Assert_SameDLLVersion ( const wchar_t* wszTestFile0,
                 static_cast_p2p <void> (&wszFileDescrip),
                                         &cbProductBytes );
 
+      if (cbProductBytes == 0)
+      {
+        _snwprintf_s ( wszPropName, 63,
+                      LR"(\StringFileInfo\%04x%04x\ProductName)",
+                        lpTranslate   [0].wLanguage,
+                          lpTranslate [0].wCodePage );
+
+        SK_VerQueryValueW ( cbData,
+                              wszPropName,
+                  static_cast_p2p <void> (&wszFileDescrip),
+                                          &cbProductBytes );
+      }
+
       _snwprintf_s ( wszPropName, 63,
                       LR"(\StringFileInfo\%04x%04x\FileVersion)",
                         lpTranslate   [0].wLanguage,
@@ -1916,6 +1934,19 @@ SK_Assert_SameDLLVersion ( const wchar_t* wszTestFile0,
                             wszPropName,
                 static_cast_p2p <void> (&wszFileVersion),
                                         &cbVersionBytes );
+
+      if (cbVersionBytes == 0)
+      {
+        _snwprintf_s ( wszPropName, 63,
+                        LR"(\StringFileInfo\%04x%04x\ProductVersion)",
+                          lpTranslate   [0].wLanguage,
+                            lpTranslate [0].wCodePage );
+
+        SK_VerQueryValueW ( cbData,
+                              wszPropName,
+                  static_cast_p2p <void> (&wszFileVersion),
+                                          &cbVersionBytes );
+      }
     }
 
     if ( cbTranslatedBytes == 0 ||
@@ -1984,6 +2015,19 @@ SK_GetDLLVersionStr (const wchar_t* wszName)
               static_cast_p2p <void> (&wszFileDescrip),
                                       &cbProductBytes );
 
+    if (cbProductBytes == 0)
+    {
+      _snwprintf_s ( wszPropName, 63,
+                     LR"(\StringFileInfo\%04x%04x\ProductName)",
+                       lpTranslate   [0].wLanguage,
+                         lpTranslate [0].wCodePage );
+
+      SK_VerQueryValueW ( cbData,
+                            wszPropName,
+                static_cast_p2p <void> (&wszFileDescrip),
+                                        &cbProductBytes );
+    }
+
     _snwprintf_s ( wszPropName, 63,
                     LR"(\StringFileInfo\%04x%04x\FileVersion)",
                       lpTranslate   [0].wLanguage,
@@ -1993,6 +2037,19 @@ SK_GetDLLVersionStr (const wchar_t* wszName)
                           wszPropName,
               static_cast_p2p <void> (&wszFileVersion),
                                       &cbVersionBytes );
+
+    if (cbVersionBytes == 0)
+    {
+      _snwprintf_s ( wszPropName, 63,
+                       LR"(\StringFileInfo\%04x%04x\ProductVersion)",
+                         lpTranslate   [0].wLanguage,
+                           lpTranslate [0].wCodePage );
+
+      SK_VerQueryValueW ( cbData,
+                            wszPropName,
+                static_cast_p2p <void> (&wszFileVersion),
+                                        &cbVersionBytes );
+    }
   }
 
   if ( cbTranslatedBytes == 0 ||
@@ -2062,6 +2119,19 @@ SK_GetDLLVersionShort (const wchar_t* wszName)
               static_cast_p2p <void> (&wszFileDescrip),
                                       &cbProductBytes );
 
+    if (cbProductBytes == 0)
+    {
+      _snwprintf_s ( wszPropName, 63,
+                    LR"(\StringFileInfo\%04x%04x\ProductName)",
+                      lpTranslate   [0].wLanguage,
+                        lpTranslate [0].wCodePage );
+
+      SK_VerQueryValueW ( cbData,
+                            wszPropName,
+                static_cast_p2p <void> (&wszFileDescrip),
+                                        &cbProductBytes );
+    }
+
     _snwprintf_s ( wszPropName, 63,
                     LR"(\StringFileInfo\%04x%04x\FileVersion)",
                       lpTranslate   [0].wLanguage,
@@ -2071,6 +2141,19 @@ SK_GetDLLVersionShort (const wchar_t* wszName)
                           wszPropName,
               static_cast_p2p <void> (&wszFileVersion),
                                       &cbVersionBytes );
+
+    if (cbVersionBytes == 0)
+    {
+      _snwprintf_s ( wszPropName, 63,
+                      LR"(\StringFileInfo\%04x%04x\ProductVersion)",
+                        lpTranslate   [0].wLanguage,
+                          lpTranslate [0].wCodePage );
+
+      SK_VerQueryValueW ( cbData,
+                            wszPropName,
+                static_cast_p2p <void> (&wszFileVersion),
+                                        &cbVersionBytes );
+    }
   }
 
   if ( cbTranslatedBytes == 0 ||
@@ -2244,6 +2327,8 @@ SKX_ScanAlignedEx ( const void* pattern, size_t len,   const void* mask,
                           SK_MemScan_Params__v0 params =
                           SK_MemScan_Params__v0 ()       )
 {
+  static auto constexpr _MAX_SEARCH_TIME_IN_MS = 5000UL;
+
   DWORD dwStartTime =
     SK_timeGetTime ();
 
@@ -2337,7 +2422,7 @@ uint8_t* const PAGE_WALK_LIMIT = (base_addr + static_cast <uintptr_t>(1ULL << 36
 
   while (it < end_addr)
   {
-    if (SK_timeGetTime () - dwStartTime > 2000UL)
+    if (SK_timeGetTime () - dwStartTime > _MAX_SEARCH_TIME_IN_MS)
     {
       SK_LOG0 ( ( L"Pattern search took too long, aborting..." ),
                   L" Sig Scan " );
@@ -2387,7 +2472,7 @@ uint8_t* const PAGE_WALK_LIMIT = (base_addr + static_cast <uintptr_t>(1ULL << 36
 
     while (it < next_rgn)
     {
-      if (SK_timeGetTime () - dwStartTime > 2000UL)
+      if (SK_timeGetTime () - dwStartTime > _MAX_SEARCH_TIME_IN_MS)
       {
         SK_LOG0 ( ( L"Pattern search took too long, aborting..." ),
                     L" Sig Scan " );
@@ -5627,3 +5712,49 @@ SK_CharNextA (const char *szInput, int n)
 
   return szNext;
 };
+
+size_t
+SK_Memory_EmptyWorkingSet (void)
+{
+  using  K32EmptyWorkingSet_pfn = BOOL (WINAPI *)(HANDLE);
+  static K32EmptyWorkingSet_pfn
+         K32EmptyWorkingSet =
+        (K32EmptyWorkingSet_pfn) SK_GetProcAddress ( L"kernel32.dll",
+        "K32EmptyWorkingSet" );
+
+  if (K32EmptyWorkingSet != nullptr)
+  {
+    HANDLE hCurrentProcess =
+      SK_GetCurrentProcess ();
+
+    PROCESS_MEMORY_COUNTERS pmc = {
+      .cb = sizeof (PROCESS_MEMORY_COUNTERS)
+    };
+
+    size_t working_set_before = 0;
+
+    if (GetProcessMemoryInfo (hCurrentProcess, &pmc, pmc.cb))
+    { working_set_before =                      pmc.WorkingSetSize; }
+
+    if (! K32EmptyWorkingSet (hCurrentProcess))
+    {
+      SK_LOGi0 (L"Failed to Empty Working Set?! Error=%d", GetLastError ());
+    }
+
+    pmc = { .cb = sizeof (PROCESS_MEMORY_COUNTERS) };
+
+    if (GetProcessMemoryInfo (hCurrentProcess, &pmc, pmc.cb))
+    {
+      SK_LOGi0 (
+        L"Working Set Before: %zu -- Shrunk by %zu bytes",
+          working_set_before,
+          working_set_before - pmc.WorkingSetSize
+      );
+
+      return
+        pmc.WorkingSetSize;
+    }
+  }
+
+  return 0;
+}

@@ -465,6 +465,7 @@ struct sk_config_t
     bool        reuse_overlay_pause   =  false;// Use Steam's overlay pause mode for our own
                                                //   control panel
     bool        silent                = false;
+    bool        steam_is_b0rked       = false; // Need to swallow some exceptions or Streamline may crash games
   } platform;
 
   struct epic_s {
@@ -805,6 +806,7 @@ struct sk_config_t
       bool    warned_low_vram      = false; // NOT SAVED: State of warn_if_vram_exceeds
       bool    allow_d3d12_footguns = false; // Allow overrides that are unsafe in D3D12
       bool    fake_fullscreen_mode = false; // Trick APIs like NvAPI into thinking FSE is on
+      float   vram_budget_scale    =  1.0f; // Over- or under-report VRAM capabilities.
       struct hooks_s {
         bool  create_swapchain     =  true;
         bool  create_swapchain4hwnd=  true;
@@ -816,6 +818,8 @@ struct sk_config_t
       bool    disable_telemetry    = false;
       bool    disable_gpu_decomp   = false;
       bool    force_file_buffering = false;
+      int     submit_threads       = -1;
+      int     cpu_decomp_threads   = -1;
     } dstorage;
 
     struct {
@@ -1010,6 +1014,7 @@ struct sk_config_t
       bool    allow_scrgb         =   true; // Use Compute Copy HDR10 <--> scRGB
       bool    dump_buffers        =  false;
       bool    spoof_support       =  false;
+      bool    calculate_delta_ms  =  false;
     } dlss;
     struct misc_s {
       int     force_rebar         = SK_NoPreference;
@@ -1227,7 +1232,9 @@ struct sk_config_t
     bool     allow_dxdiagn            =  true; // Slows game launches way down
     bool     auto_large_address_patch =  true;
     bool     init_on_separate_thread  =  true;
+    bool     init_sync_for_streamline = false;
     bool     shutdown_on_window_close = false;
+    bool     disable_dx12_vk_interop  = false;
     bool     reshade_mode             = false;
     bool     fsr3_mode                = false;
   } compatibility;
@@ -1313,6 +1320,7 @@ struct sk_config_t
     bool    central_repository  = false;
     bool    wait_for_debugger   = false;
     bool    return_to_skif      = false;
+    bool    auto_load_asi_files = false;
   } system;
 
   struct priority_scheduling_s {
@@ -1323,6 +1331,7 @@ struct sk_config_t
     bool    deny_foreign_change =  true;
     int     minimum_render_prio = THREAD_PRIORITY_ABOVE_NORMAL;
     DWORD   available_cpu_cores =   1UL;
+    int64_t cpu_affinity_mask   = 0xFFFFFFFFFFFFFFFFULL;
   } priority;
 
   struct skif_s {
@@ -1666,6 +1675,8 @@ enum class SK_GAME_ID
   GodOfWar,                     // GoW.exe
   TalosPrinciple2,              // Talos2-Win64-Shipping.exe
   CrashBandicootNSaneTrilogy,   // CrashBandicootNSaneTrilogy.exe
+  StarWarsOutlaws,              // outlaws.exe
+  ShadPS4,                      // shadPS4.exe
 
   UNKNOWN_GAME               = 0xffff
 };

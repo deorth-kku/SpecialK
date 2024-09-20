@@ -407,11 +407,15 @@ NVSDK_NGX_D3D12_EvaluateFeature_Detour (ID3D12GraphicsCommandList *InCmdList, co
   const SK_RenderBackend_V2 &rb =
     SK_GetCurrentRenderBackend ();
 
-  const double dFrameTimeDeltaInMsec =
-    1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
-               static_cast <double> (SK_QpcFreq) );
+  if (config.nvidia.dlss.calculate_delta_ms)
+  {
+    const double dFrameTimeDeltaInMsec =
+      1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
+                 static_cast <double> (SK_QpcFreq) ) * SK_NGX_IsUsingDLSS_G () ? 2.0
+                                                                               : 1.0;
 
-  ((NVSDK_NGX_Parameter *)InParameters)->Set (NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, dFrameTimeDeltaInMsec);
+    ((NVSDK_NGX_Parameter *)InParameters)->Set (NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, dFrameTimeDeltaInMsec);
+  }
 
   NVSDK_NGX_Result ret =
     NVSDK_NGX_D3D12_EvaluateFeature_Original (InCmdList, InFeatureHandle, InParameters, InCallback);
@@ -534,9 +538,9 @@ SK_NGX12_UpdateDLSSGStatus (void)
   }
 
   __SK_IsDLSSGActive =
-    ReadULong64Acquire (&SK_NGX_DLSS12.frame_gen.LastFrame) >= SK_GetFramesDrawn () - 8 &&
-                       uiNumberOfFrames >= 1 &&
-                       uiEnableDLSSGInterp   && uiEnableOFA;
+    ReadULong64Acquire (&SK_NGX_DLSS12.frame_gen.LastFrame) >= SK_GetFramesDrawn () - 8 &&/*
+                                        (uiNumberOfFrames == 0 || uiNumberOfFrames > 1) &&*/
+                                         uiEnableDLSSGInterp   && uiEnableOFA;
 
   if (SK_NGX_DLSS12.frame_gen.Handle != nullptr)
   {

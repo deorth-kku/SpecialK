@@ -36,6 +36,35 @@ bool __SK_ForceDLSSGPacing      = false;
 
 SK_LazyGlobal <NGX_ThreadSafety> SK_NGX_Threading;
 
+bool
+SK_NGX_IsUsingDLSS (void)
+{
+  const auto& dlss_ss =
+    (SK_NGX_DLSS12.apis_called    ?
+     SK_NGX_DLSS12.super_sampling : SK_NGX_DLSS11.super_sampling);
+
+  return                 dlss_ss.Handle     != nullptr                &&
+    ReadULong64Acquire (&dlss_ss.LastFrame) >= SK_GetFramesDrawn () - 8;
+}
+
+bool
+SK_NGX_IsUsingDLSS_D (void)
+{
+  const auto& dlss_ss =
+    SK_NGX_DLSS12.super_sampling;
+
+  return                 dlss_ss.Handle     != nullptr                  &&
+    ReadULong64Acquire (&dlss_ss.LastFrame) >= SK_GetFramesDrawn () - 8 &&
+                         dlss_ss.DLSS_Type  == NVSDK_NGX_Feature_RayReconstruction;
+}
+
+bool
+SK_NGX_IsUsingDLSS_G (void)
+{
+  return /// TODO Refactor
+    __SK_IsDLSSGActive;
+}
+
 static  unsigned  int SK_NGX_GameSetPerfQuality = 0;
 static constexpr bool SK_NGX_LogAllParams       = false;
 
@@ -85,18 +114,26 @@ NVSDK_NGX_Parameter_SetF_Detour (NVSDK_NGX_Parameter* InParameter, const char* I
 
   if (! strcmp (InName, NVSDK_NGX_Parameter_FrameTimeDeltaInMsec))
   {
-    const SK_RenderBackend_V2 &rb =
-      SK_GetCurrentRenderBackend ();
+    if (config.nvidia.dlss.calculate_delta_ms)
+    {
+      const SK_RenderBackend_V2 &rb =
+        SK_GetCurrentRenderBackend ();
 
-    const double dFrameTimeDeltaInMsec =
-      1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
-                 static_cast <double> (SK_QpcFreq) );
+      const double dFrameTimeDeltaInMsec =
+        1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
+                   static_cast <double> (SK_QpcFreq) ) * SK_NGX_IsUsingDLSS_G () ? 2.0
+                                                                                 : 1.0;
 
-    NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, dFrameTimeDeltaInMsec);
+      NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, dFrameTimeDeltaInMsec);
+    }
 
+    else
+    {
+      NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, InValue);
 #if 0
     SK_LOGi0 (L"Frame Time Delta: Game=%f, SK=%f -- %f difference", InValue, dFrameTimeDeltaInMsec, fabs (InValue - dFrameTimeDeltaInMsec));
 #endif
+    }
 
     return;
   }
@@ -137,18 +174,27 @@ NVSDK_NGX_Parameter_SetD_Detour (NVSDK_NGX_Parameter* InParameter, const char* I
 
   if (! strcmp (InName, NVSDK_NGX_Parameter_FrameTimeDeltaInMsec))
   {
-    const SK_RenderBackend_V2 &rb =
-      SK_GetCurrentRenderBackend ();
+    if (config.nvidia.dlss.calculate_delta_ms)
+    {
+      const SK_RenderBackend_V2 &rb =
+        SK_GetCurrentRenderBackend ();
 
-    const double dFrameTimeDeltaInMsec =
-      1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
-                 static_cast <double> (SK_QpcFreq) );
+      const double dFrameTimeDeltaInMsec =
+        1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
+                   static_cast <double> (SK_QpcFreq) ) * SK_NGX_IsUsingDLSS_G () ? 2.0
+                                                                                 : 1.0;
 
-    NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, dFrameTimeDeltaInMsec);
+      NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, dFrameTimeDeltaInMsec);
 
 #if 0
-    SK_LOGi0 (L"Frame Time Delta: Game=%f, SK=%f -- %f difference", InValue, dFrameTimeDeltaInMsec, fabs (InValue - dFrameTimeDeltaInMsec));
+      SK_LOGi0 (L"Frame Time Delta: Game=%f, SK=%f -- %f difference", InValue, dFrameTimeDeltaInMsec, fabs (InValue - dFrameTimeDeltaInMsec));
 #endif
+    }
+
+    else
+    {
+      NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, InValue);
+    }
 
     return;
   }
@@ -253,11 +299,15 @@ NVSDK_NGX_Parameter_SetI_Detour (NVSDK_NGX_Parameter* InParameter, const char* I
     }
   }
 
-  if ((! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA))        ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality))     ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced))    ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance)) ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance)))
+  static std::unordered_set <std::string> presets = {
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance
+  };
+
+  if (presets.count (InName) != 0)
   {
     if (config.nvidia.dlss.force_dlaa && (config.nvidia.dlss.forced_preset == -1))
     {
@@ -295,11 +345,15 @@ NVSDK_NGX_Parameter_SetUI_Detour (NVSDK_NGX_Parameter* InParameter, const char* 
     }
   }
 
-  if ((! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA))        ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality))     ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced))    ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance)) ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance)))
+  static std::unordered_set <std::string> presets = {
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance
+  };
+
+  if (presets.count (InName) != 0)
   {
     if (config.nvidia.dlss.force_dlaa && (config.nvidia.dlss.forced_preset == -1))
     {
@@ -337,11 +391,15 @@ NVSDK_NGX_Parameter_SetULL_Detour (NVSDK_NGX_Parameter* InParameter, const char*
     }
   }
 
-  if ((! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA))        ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality))     ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced))    ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance)) ||
-      (! strcmp (InName, NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance)))
+  static std::unordered_set <std::string> presets = {
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_DLAA,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Quality,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Balanced,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_Performance,
+    NVSDK_NGX_Parameter_DLSS_Hint_Render_Preset_UltraPerformance
+  };
+
+  if (presets.count (InName) != 0)
   {
     if (config.nvidia.dlss.force_dlaa && (config.nvidia.dlss.forced_preset == -1))
     {
@@ -664,32 +722,6 @@ SK_NGX_GetDLSSParameters (void)
 
   return
     SK_NGX_DLSS11.super_sampling.Parameters;
-}
-
-bool
-SK_NGX_IsUsingDLSS (void)
-{
-  if (                     SK_NGX_DLSS12.apis_called)
-    return                 SK_NGX_DLSS12.super_sampling.Handle     != nullptr &&
-      ReadULong64Acquire (&SK_NGX_DLSS12.super_sampling.LastFrame) >= SK_GetFramesDrawn () - 8;
-
-  return                 SK_NGX_DLSS11.super_sampling.Handle     != nullptr &&
-    ReadULong64Acquire (&SK_NGX_DLSS11.super_sampling.LastFrame) >= SK_GetFramesDrawn () - 8;
-}
-
-bool
-SK_NGX_IsUsingDLSS_D (void)
-{
-  return                 SK_NGX_DLSS12.super_sampling.Handle     != nullptr &&
-    ReadULong64Acquire (&SK_NGX_DLSS12.super_sampling.LastFrame) >= SK_GetFramesDrawn () - 8 &&
-                         SK_NGX_DLSS12.super_sampling.DLSS_Type == NVSDK_NGX_Feature_RayReconstruction;
-}
-
-bool
-SK_NGX_IsUsingDLSS_G (void)
-{
-  return /// TODO Refactor
-    __SK_IsDLSSGActive;
 }
 
 SK_DLSS_Context::version_s SK_DLSS_Context::dlss_s::Version;

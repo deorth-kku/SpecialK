@@ -2684,9 +2684,6 @@ SK::Framerate::Stats::sortAndCacheFrametimeHistory (void) //noexcept
         pWorker->hSignalShutdown.m_h
       };
 
-      SK_RenderBackend& rb =
-        SK_GetCurrentRenderBackend ();
-
       while ( WAIT_OBJECT_0 ==
                 WaitForMultipleObjects ( 2, worker_events, FALSE, INFINITE ) )
       {
@@ -2700,30 +2697,6 @@ SK::Framerate::Stats::sortAndCacheFrametimeHistory (void) //noexcept
           kSortBuffer.second.begin (),
           kSortBuffer.second.end   (), std::greater <> ()
         );
-
-        if (sk::NVAPI::nv_hardware)
-        {
-          //
-          // Sample NVIDIA's VBlank counter from this thread, because that API
-          //   has massive performance penalties and this thread runs constantly
-          //     with little to no real workload.
-          //
-          auto& nvapi_display =
-            rb.displays [rb.active_display].nvapi;
-
-          if (nvapi_display.display_handle != nullptr)
-          {
-            const auto current_frame =
-              SK_GetFramesDrawn ();
-
-            if (nvapi_display.vblank_counter.last_frame_sampled < current_frame - 1)
-            {   nvapi_display.vblank_counter.last_frame_sampled = current_frame;
-              nvapi_display.vblank_counter.addRecord (
-                nvapi_display.display_handle, SK_timeGetTime ()
-              );
-            }
-          }
-        }
 
         kSortBuffer.first =
           SK_GetFramesDrawn ();

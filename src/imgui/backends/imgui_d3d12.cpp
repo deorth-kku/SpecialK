@@ -52,6 +52,10 @@ D3D12GraphicsCommandList_ExecuteIndirect_Original      = nullptr;
 D3D12GraphicsCommandList_OMSetRenderTargets_pfn
 D3D12GraphicsCommandList_OMSetRenderTargets_Original   = nullptr;
 
+static inline constexpr GUID SKID_D3D12ParentCmdQueue = { 0x33ede230, 0xbb84, 0x4585, { 0xa6, 0xd2, 0x9a, 0x47, 0x3,  0x66, 0xc5, 0xdb } };
+static inline constexpr GUID SKID_D3D12BackbufferPtr  = { 0xa1d3a46b, 0x1ac1, 0x4e83, { 0x99, 0x83, 0x12, 0x35, 0x18, 0x34, 0x3d, 0x80 } };
+static inline constexpr GUID SKID_D3D12BackbufferIdx  = { 0x2d99b3c7, 0x169,  0x48e5, { 0x95, 0xbd, 0x3d, 0x1,  0xcf, 0x55, 0xb3, 0xe0 } };
+
 struct SK_ImGui_D3D12Ctx
 {
   SK_ComPtr <ID3D12Device>        pDevice;
@@ -70,7 +74,7 @@ struct SK_ImGui_D3D12Ctx
   struct FrameHeap
   {
     struct buffer_s : SK_ComPtr <ID3D12Resource>
-    { INT size;
+    { INT size = 0; void* data = nullptr;
     } Vb, Ib;
   } frame_heaps [DXGI_MAX_SWAP_CHAIN_BUFFERS];
 } static _imgui_d3d12;
@@ -112,11 +116,13 @@ void
 ImGui_ImplDX12_RenderDrawData ( ImDrawData* draw_data,
               SK_D3D12_RenderCtx::FrameCtx* pFrame )
 {
+  //std::scoped_lock lock (pFrame->pRoot->_ctx_lock);
+
   // Avoid rendering when minimized
   if (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f)
     return;
 
-  if (! ( _d3d12_rbk->_pSwapChain.p || _d3d12_rbk->_pDevice.p ) )
+  if (! ( _d3d12_rbk->_pSwapChain.p && _d3d12_rbk->_pDevice.p ) )
     return;
 
   //ImGuiIO& io =
@@ -144,28 +150,48 @@ ImGui_ImplDX12_RenderDrawData ( ImDrawData* draw_data,
     pFrame->pCmdList;
 
   bool sync_cmd_list =
-    ( (! pHeap->Vb.p || pHeap->Vb.size < draw_data->TotalVtxCount) ||
-      (! pHeap->Ib.p || pHeap->Ib.size < draw_data->TotalIdxCount) );
+    ( (pHeap->Vb.p == nullptr || pHeap->Vb.data == nullptr || pHeap->Vb.size < draw_data->TotalVtxCount) ||
+      (pHeap->Ib.p == nullptr || pHeap->Ib.data == nullptr || pHeap->Ib.size < draw_data->TotalIdxCount) );
 
   // Creation, or reallocation of vtx / idx buffers required...
   if (sync_cmd_list)
   {
+    D3D12_HEAP_TYPE                    heap_type = D3D12_HEAP_TYPE_UPLOAD;
+#ifdef __ID3D12GraphicsCommandList10_FWD_DEFINED__
+    D3D12_FEATURE_DATA_D3D12_OPTIONS16 opt16     = { };
+
+    pFrame->pRoot->_pDevice->
+      CheckFeatureSupport (D3D12_FEATURE_D3D12_OPTIONS16, &opt16,
+                                                   sizeof (opt16));
+
+    if (opt16.GPUUploadHeapSupported)
+      heap_type = D3D12_HEAP_TYPE_GPU_UPLOAD;
+#endif
+
     if (! pFrame->wait_for_gpu ())
       return;
 
     try
     {
-      if (! pHeap->Vb.p || pHeap->Vb.size < draw_data->TotalVtxCount)
+      if (pHeap->Vb.p == nullptr || pHeap->Vb.size < draw_data->TotalVtxCount)
       {
+        if (pHeap->Vb.data != nullptr &&
+            pHeap->Vb.p    != nullptr)
+            pHeap->Vb->Unmap (0, nullptr);
+
         auto overAlloc =
-          draw_data->TotalVtxCount + 5000;
+          (std::max (draw_data->TotalVtxCount, pHeap->Vb.size) * 2) +
+          (std::max (draw_data->TotalVtxCount, pHeap->Vb.size) * 2) % 4096;
+
+        SK_LOGi0 (L"Growing ImGui Vertex Buffer from %d to %d", pHeap->Vb.size, overAlloc);
 
         pHeap->Vb.Release ();
         pHeap->Vb.size = 0;
+        pHeap->Vb.data = nullptr;
 
         D3D12_HEAP_PROPERTIES
           props                 = { };
-          props.Type            = D3D12_HEAP_TYPE_UPLOAD;
+          props.Type            = heap_type;
 
         D3D12_RESOURCE_DESC
           desc                  = { };
@@ -187,17 +213,25 @@ ImGui_ImplDX12_RenderDrawData ( ImDrawData* draw_data,
         pHeap->Vb.size = overAlloc;
       }
 
-      if (! pHeap->Ib.p || pHeap->Ib.size < draw_data->TotalIdxCount)
+      if (pHeap->Ib.p == nullptr || pHeap->Ib.size < draw_data->TotalIdxCount)
       {
+        if (pHeap->Ib.data != nullptr &&
+            pHeap->Ib.p    != nullptr)
+            pHeap->Ib->Unmap (0, nullptr);
+
         auto overAlloc =
-          draw_data->TotalIdxCount + 10000;
+          (std::max (draw_data->TotalIdxCount, pHeap->Ib.size) * 2) +
+          (std::max (draw_data->TotalIdxCount, pHeap->Ib.size) * 2) % 8192;
+
+        SK_LOGi0 (L"Growing ImGui Index Buffer from %d to %d", pHeap->Ib.size, overAlloc);
 
         pHeap->Ib.Release ();
         pHeap->Ib.size = 0;
+        pHeap->Ib.data = nullptr;
 
         D3D12_HEAP_PROPERTIES
           props                 = { };
-          props.Type            = D3D12_HEAP_TYPE_UPLOAD;
+          props.Type            = heap_type;
 
         D3D12_RESOURCE_DESC
           desc                  = { };
@@ -231,80 +265,22 @@ ImGui_ImplDX12_RenderDrawData ( ImDrawData* draw_data,
     }
   }
 
-  // Copy and convert all vertices into a single contiguous buffer
-  ImDrawVert* vtx_heap = nullptr;
-  ImDrawIdx*  idx_heap = nullptr;
-
-  D3D12_RANGE range = { };
-
   try
   {
-    ThrowIfFailed (pHeap->Vb->Map (0, &range, (void **)&vtx_heap));
-    ThrowIfFailed (pHeap->Ib->Map (0, &range, (void **)&idx_heap));
+    // Write-only
+    D3D12_RANGE range = { };
 
-    ImDrawVert* vtx_ptr = vtx_heap;
-    ImDrawIdx*  idx_ptr = idx_heap;
+    if (pHeap->Vb.data == nullptr && pHeap->Vb != nullptr)
+      ThrowIfFailed (pHeap->Vb->Map (0, &range, (void **)&pHeap->Vb.data));
 
-    for (int n = 0; n < draw_data->CmdListsCount; n++)
-    {
-      const ImDrawList*
-        cmd_list = draw_data->CmdLists [n];
-
-      if (config.imgui.render.strip_alpha)
-      {
-        for (INT i = 0; i < cmd_list->VtxBuffer.Size; i++)
-        {
-          ImU32 color =
-            ImColor (cmd_list->VtxBuffer.Data [i].col);
-
-          uint8_t alpha = (((color & 0xFF000000U) >> 24U) & 0xFFU);
-
-          // Boost alpha for visibility
-          if (alpha < 93 && alpha != 0)
-            alpha += (93  - alpha) / 2;
-
-          float a = ((float)                       alpha / 255.0f);
-          float r = ((float)((color & 0xFF0000U) >> 16U) / 255.0f);
-          float g = ((float)((color & 0x00FF00U) >>  8U) / 255.0f);
-          float b = ((float)((color & 0x0000FFU)       ) / 255.0f);
-
-          color =                    0xFF000000U  |
-                  ((UINT)((r * a) * 255U) << 16U) |
-                  ((UINT)((g * a) * 255U) <<  8U) |
-                  ((UINT)((b * a) * 255U)       );
-
-#if 0
-          cmd_list->VtxBuffer.Data[i].col =
-            (ImVec4)ImColor (color);
-#else
-          cmd_list->VtxBuffer.Data[i].col =
-            ImColor (color);
-          /// XXX: FIXME
-#endif
-        }
-      }
-
-      //memcpy (vtx_ptr, cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size * sizeof (ImDrawVert));
-      //memcpy (idx_ptr, cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size * sizeof (ImDrawIdx));
-      //
-      //vtx_ptr += cmd_list->VtxBuffer.Size;
-      //idx_ptr += cmd_list->IdxBuffer.Size;
-
-      if (vtx_ptr != nullptr)
-          vtx_ptr = std::copy_n (cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size, vtx_ptr);
-
-      if (idx_ptr != nullptr)
-          idx_ptr = std::copy_n (cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size, idx_ptr);
-    }
-
-    pHeap->Vb->Unmap (0, &range);
-    pHeap->Ib->Unmap (0, &range);
+    if (pHeap->Ib.data == nullptr && pHeap->Ib != nullptr)
+      ThrowIfFailed (pHeap->Ib->Map (0, &range, (void **)&pHeap->Ib.data));
   }
 
   catch (const SK_ComException& e)
   {
-    if (vtx_heap != nullptr) pHeap->Vb->Unmap (0, &range);
-    if (idx_heap != nullptr) pHeap->Ib->Unmap (0, &range);
+    if (pHeap->Vb.data != nullptr && pHeap->Vb.p != nullptr) { pHeap->Vb->Unmap (0, nullptr); pHeap->Vb.data = nullptr; }
+    if (pHeap->Ib.data != nullptr && pHeap->Ib.p != nullptr) { pHeap->Ib->Unmap (0, nullptr); pHeap->Ib.data = nullptr; }
 
     SK_LOG0 ( ( L" Exception: %hs [%ws]", e.what (), __FUNCTIONW__ ),
                 L"ImGuiD3D12" );
@@ -312,6 +288,62 @@ ImGui_ImplDX12_RenderDrawData ( ImDrawData* draw_data,
     _d3d12_rbk->release (_d3d12_rbk->_pSwapChain);
 
     return;
+  }
+
+  // Copy and convert all vertices into a single contiguous buffer
+  ImDrawVert* vtx_heap = (ImDrawVert *)pHeap->Vb.data;
+  ImDrawIdx*  idx_heap = (ImDrawIdx  *)pHeap->Ib.data;
+
+  ImDrawVert* vtx_ptr = vtx_heap;
+  ImDrawIdx*  idx_ptr = idx_heap;
+
+  if (vtx_ptr == nullptr || idx_ptr == nullptr)
+    return;
+
+  for (int n = 0; n < draw_data->CmdListsCount; n++)
+  {
+    const ImDrawList*
+      cmd_list = draw_data->CmdLists [n];
+
+    if (config.imgui.render.strip_alpha)
+    {
+      for (INT i = 0; i < cmd_list->VtxBuffer.Size; i++)
+      {
+        ImU32 color =
+          ImColor (cmd_list->VtxBuffer.Data [i].col);
+
+        uint8_t alpha = (((color & 0xFF000000U) >> 24U) & 0xFFU);
+
+        // Boost alpha for visibility
+        if (alpha < 93 && alpha != 0)
+          alpha += (93  - alpha) / 2;
+
+        float a = ((float)                       alpha / 255.0f);
+        float r = ((float)((color & 0xFF0000U) >> 16U) / 255.0f);
+        float g = ((float)((color & 0x00FF00U) >>  8U) / 255.0f);
+        float b = ((float)((color & 0x0000FFU)       ) / 255.0f);
+
+        color =                    0xFF000000U  |
+                ((UINT)((r * a) * 255U) << 16U) |
+                ((UINT)((g * a) * 255U) <<  8U) |
+                ((UINT)((b * a) * 255U)       );
+
+#if 0
+        cmd_list->VtxBuffer.Data[i].col =
+          (ImVec4)ImColor (color);
+#else
+        cmd_list->VtxBuffer.Data[i].col =
+          ImColor (color);
+        /// XXX: FIXME
+#endif
+      }
+    }
+
+    if (vtx_ptr != nullptr)
+        vtx_ptr = std::copy_n (cmd_list->VtxBuffer.Data, cmd_list->VtxBuffer.Size, vtx_ptr);
+
+    if (idx_ptr != nullptr)
+        idx_ptr = std::copy_n (cmd_list->IdxBuffer.Data, cmd_list->IdxBuffer.Size, idx_ptr);
   }
 
   if (! pFrame->begin_cmd_list ())
@@ -750,7 +782,7 @@ SK_D3D12_CreateDXTex ( DirectX::TexMetadata&  metadata,
         &desc,  D3D12_RESOURCE_STATE_COPY_DEST,
         nullptr, IID_PPV_ARGS (&pTexture.p))
     );SK_D3D12_SetDebugName (   pTexture.p, SK_FormatStringW (
-              L"SK D3D12 Generic Texture%d", uiTexNum++ ) );
+              L"SK D3D12 Generic Texture%d", uiTexNum ) );
 
     uintptr_t uploadPitch = (width * 4 + D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u)
                                      & ~(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT - 1u);
@@ -885,7 +917,7 @@ SK_D3D12_CreateDXTex ( DirectX::TexMetadata&  metadata,
 
     SK_D3D12_SetDebugName (
       texture.pTexture, SK_FormatStringW (
-    L"SK D3D12 Texture%d", uiTexNum ) );
+    L"SK D3D12 Texture%d", uiTexNum++ ) );
   }
 
   catch (const SK_ComException& e) {
@@ -1109,6 +1141,11 @@ ImGui_ImplDX12_Init ( ID3D12Device*               device,
   _imgui_d3d12.hFontSrvGpuDescHandle = font_srv_gpu_desc_handle;
   _imgui_d3d12.hWndSwapChain         = hwnd;
 
+  auto& rb =
+    SK_GetCurrentRenderBackend ();
+
+  rb.displays [rb.active_display].nvapi.vblank_counter.resetStats ();
+
 #ifdef SK_D3D12_PERSISTENT_IMGUI_DEV_OBJECTS
   if (_imgui_d3d12.pDevice.p != _imgui_d3d12.pLastDevice.p)
   {
@@ -1122,11 +1159,20 @@ ImGui_ImplDX12_Init ( ID3D12Device*               device,
     // Create buffers with a default size (they will later be grown as needed)
     for ( auto& frame : _imgui_d3d12.frame_heaps )
     {
+      if (frame.Ib.data != nullptr)
+          frame.Ib->Unmap (0, nullptr);
+
+      if (frame.Vb.data != nullptr)
+          frame.Vb->Unmap (0, nullptr);
+
       frame.Ib.Release ();
       frame.Vb.Release ();
 
       frame.Vb.size = 25000;
       frame.Ib.size = 50000;
+
+      frame.Vb.data = nullptr;
+      frame.Ib.data = nullptr;
     }
 
     _imgui_d3d12.pLastDevice = _imgui_d3d12.pDevice;
@@ -1621,8 +1667,8 @@ D3D12GraphicsCommandList_CopyResource_Detour (
     typelessSrc        = DirectX::MakeTypeless (src_desc.Format),
     typelessDst        = DirectX::MakeTypeless (dst_desc.Format);
 
-  if ( typelessDst == typelessBackbuffer &&
-       typelessSrc != typelessDst        &&
+  if ( (typelessDst == typelessBackbuffer || typelessBackbuffer == DXGI_FORMAT_UNKNOWN)  &&
+        typelessSrc != typelessDst        &&
          DirectX::BitsPerColor (src_desc.Format) !=
          DirectX::BitsPerColor (dst_desc.Format) )
   {
@@ -2032,6 +2078,8 @@ SK_D3D12_HDR_CopyBuffer ( ID3D12GraphicsCommandList *pCommandList,
                           ID3D12Resource            *pSrcResource,
                           ID3D12Resource            *pDstResource )
 {
+  //std::scoped_lock lock (_d3d12_rbk->_ctx_lock);
+
   if (pCommandList == nullptr || pSrcResource == nullptr || pDstResource == nullptr)
   {
     SK_RunOnce (SK_LOGi0 (L"Cannot perform HDR CopyBuffer because one or more parameters are nullptr..."));
@@ -2122,7 +2170,7 @@ SK_D3D12_HDR_CopyBuffer ( ID3D12GraphicsCommandList *pCommandList,
   pCommandList->SetPipelineState               ( _d3d12_rbk->pHDRPipeline                );
   pCommandList->SetDescriptorHeaps             ( 1, &pCopyHeap.p                         );
   pCommandList->SetGraphicsRoot32BitConstants  ( 0, 4,  &cbuffer_luma,   0               );
-  pCommandList->SetGraphicsRoot32BitConstants  ( 1, 16, &cbuffer_cspace, 0               );
+  pCommandList->SetGraphicsRoot32BitConstants  ( 1, 20, &cbuffer_cspace, 0               );
   pCommandList->SetGraphicsRootDescriptorTable ( 2,  hBufferCopy.SRV.GPU                 );
   pCommandList->OMSetRenderTargets             ( 1, &hBufferCopy.RTV.CPU, FALSE, nullptr );
   pCommandList->IASetPrimitiveTopology         ( D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP    );
@@ -2142,7 +2190,7 @@ SK_D3D12_RenderCtx::present (IDXGISwapChain3 *pSwapChain)
   if (! pSwapChain)
     return;
 
-  if (! _pDevice.p || frames_.empty ())
+  if ((! _pDevice.p || frames_.empty ()) || _pCommandQueue.p == nullptr)
   {
     if (! init (pSwapChain, _pCommandQueue.p))
       return;
@@ -2178,7 +2226,7 @@ SK_D3D12_RenderCtx::present (IDXGISwapChain3 *pSwapChain)
   DXGI_SWAP_CHAIN_DESC1          swapDesc = { };
   pSwapChain->GetDesc1         (&swapDesc);
   if ((_imgui_d3d12.RTVFormat != swapDesc.Format &&
-       _imgui_d3d12.RTVFormat != DXGI_FORMAT_UNKNOWN) || swapIdx > frames_.size () )
+       _imgui_d3d12.RTVFormat != DXGI_FORMAT_UNKNOWN) || swapIdx >= frames_.size () )
   {
     static bool          once = false;
     if (! std::exchange (once, true))
@@ -2617,6 +2665,8 @@ SK_D3D12_RenderCtx::present (IDXGISwapChain3 *pSwapChain)
 bool
 SK_D3D12_RenderCtx::FrameCtx::begin_cmd_list (const SK_ComPtr <ID3D12PipelineState>& state)
 {
+  //std::scoped_lock lock (pRoot->_ctx_lock);
+
   if (pCmdList == nullptr)
     return false;
 
@@ -2644,6 +2694,8 @@ SK_D3D12_RenderCtx::FrameCtx::begin_cmd_list (const SK_ComPtr <ID3D12PipelineSta
 bool
 SK_D3D12_RenderCtx::FrameCtx::exec_cmd_list (void)
 {
+  //std::scoped_lock lock (pRoot->_ctx_lock);
+
   assert (bCmdListRecording);
 
   if (pCmdList == nullptr)
@@ -2662,24 +2714,43 @@ SK_D3D12_RenderCtx::FrameCtx::exec_cmd_list (void)
   //   do not attempt to execute the command list, just close it.
   //
   //  Failure to skip execution will result in device removal
-  if (pRoot->getCurrentBackBufferIndex () == iBufferIdx)
+
+  UINT                                                 uiSize                 = sizeof (uintptr_t);
+  ID3D12CommandQueue*                                           pParentQueue  = nullptr;
+  pCmdList->GetPrivateData (SKID_D3D12ParentCmdQueue, &uiSize, &pParentQueue);
+                                                       uiSize                 = sizeof (uintptr_t);  
+  ID3D12Resource*                                               pParentBuffer = nullptr;
+  pCmdList->GetPrivateData (SKID_D3D12BackbufferPtr,  &uiSize, &pParentBuffer);
+                                                       uiSize                 = sizeof (UINT);
+  UINT                                                          BufferIdx     = UINT_MAX-1;
+  pCmdList->GetPrivateData (SKID_D3D12BackbufferIdx,  &uiSize, &BufferIdx);
+
+  SK_ComPtr <ID3D12Resource>                                 pBackbuffer;
+  SK_ComPtr <IDXGISwapChain>                                 pRealSwapChain;
+  if (SK_slGetNativeInterface (pRoot->_pSwapChain, (void **)&pRealSwapChain.p) == sl::Result::eOk)
+  {   _ExchangeProxyForNative (pRoot->_pSwapChain,           pRealSwapChain);
+    pRealSwapChain->GetBuffer (BufferIdx, IID_ID3D12Resource, (void **)&pBackbuffer.p);
+  }
+
+  else if (pRoot->_pSwapChain != nullptr)
+    pRoot->_pSwapChain->GetBuffer (BufferIdx, IID_ID3D12Resource, (void **)&pBackbuffer.p);
+
+  if (pRoot->getCurrentBackBufferIndex () == BufferIdx   &&
+                            pParentBuffer == pBackbuffer &&
+      pRoot->frames_ [BufferIdx].pCmdList == pCmdList)
   {
-    pRoot->_pCommandQueue->ExecuteCommandLists (
-      ARRAYSIZE (cmd_lists),
-                 cmd_lists
-    );
+    SK_LOGi4 (L"Drew (BufferIdx=%d)...", BufferIdx);
+
+    pParentQueue->ExecuteCommandLists (ARRAYSIZE (cmd_lists), cmd_lists);
 
     return true;
   }
 
-  else
-  {
-    _d3d12_rbk->release (pRoot->_pSwapChain.p);
+  SK_LOGi0 (L"SwapChain Backbuffer changed while command lists were recording!");
 
-    SK_LOGi0 (L"SwapChain Backbuffer changed while command lists were recording!");
-
-    return false;
-  }
+  _d3d12_rbk->release (pRoot->_pSwapChain.p);
+  
+  return false;
 }
 
 bool
@@ -2707,6 +2778,8 @@ SK_D3D12_RenderCtx::FrameCtx::flush_cmd_list (void)
 bool
 SK_D3D12_RenderCtx::drain_queue (void) noexcept
 {
+  //std::scoped_lock lock (_ctx_lock);
+
   bool success { true };
 
   for (auto& frame : frames_)
@@ -2724,6 +2797,8 @@ SK_D3D12_RenderCtx::drain_queue (void) noexcept
 bool
 SK_D3D12_RenderCtx::FrameCtx::wait_for_gpu (void) noexcept
 {
+  //std::scoped_lock lock (pRoot->_ctx_lock);
+
   // Flush command list, to avoid it still referencing resources that may be destroyed after this call
   if (bCmdListRecording)
   {
@@ -2861,9 +2936,25 @@ SK_D3D12_RenderCtx::FrameCtx::~FrameCtx (void)
 #include <SpecialK/render/dxgi/dxgi_swapchain.h>
 #include <SpecialK/plugin/reshade.h>
 
+std::recursive_mutex SK_D3D12_RenderCtx::_ctx_lock;
+
 void
 SK_D3D12_RenderCtx::release (IDXGISwapChain *pSwapChain)
 {
+  std::scoped_lock lock (_ctx_lock);
+
+  //SK_ComPtr <IDXGISwapChain1>                       pNativeSwapChain;
+  //SK_slGetNativeInterface (_pSwapChain.p, (void **)&pNativeSwapChain.p);
+  //
+  //if (pNativeSwapChain.p != 0 && pNativeSwapChain.p == pSwapChain)
+  //{
+  //  SK_LOGi0 (
+  //    L"Skipping SwapChain teardown because the SwapChain is a Streamline proxy!"
+  //  );
+  //
+  //  return;
+  //}
+
   drain_queue ();
 
   if (! ((_pSwapChain.p != nullptr && pSwapChain == nullptr) ||
@@ -2935,6 +3026,7 @@ SK_D3D12_RenderCtx::release (IDXGISwapChain *pSwapChain)
   descriptorHeaps.pHDR_CopyAssist_RTV.Release ();
   descriptorHeaps.pComputeCopy.Release        ();
 
+//_pCommandQueue.Release ();
   _pSwapChain.Release ();
   _pDevice.Release    ();
 }
@@ -2942,6 +3034,12 @@ SK_D3D12_RenderCtx::release (IDXGISwapChain *pSwapChain)
 bool
 SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pCommandQueue)
 {
+  std::scoped_lock lock (_ctx_lock);
+
+  SK_ComPtr <IDXGISwapChain3>                        pNativeSwapChain;
+  if (SK_slGetNativeInterface (pSwapChain, (void **)&pNativeSwapChain.p) == sl::Result::eOk)
+                               pSwapChain =          pNativeSwapChain.p;
+
   if (pSwapChain != nullptr)
   {
     UINT  uiSize    = sizeof (void *);
@@ -2954,6 +3052,22 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
         pCommandQueue = (ID3D12CommandQueue *)pCmdQueue;
       }
     }
+  }
+
+  SK_ComPtr <ID3D12CommandQueue>                        pNativeQueue;
+  if (SK_slGetNativeInterface (pCommandQueue, (void **)&pNativeQueue.p) == sl::Result::eOk)
+  {
+    if (                       _pCommandQueue != nullptr)
+      _ExchangeProxyForNative (_pCommandQueue,          pNativeQueue)
+    else                       _pCommandQueue         = pNativeQueue;
+  }
+
+  if (pNativeSwapChain != nullptr &&
+      pNativeQueue.p   != nullptr)
+  {
+    UINT uiSize = sizeof (void *);
+
+    pSwapChain->SetPrivateData (SKID_D3D12_SwapChainCommandQueue, uiSize, _pCommandQueue);
   }
 
   // Turn HDR off in dgVoodoo2 so it does not crash
@@ -2980,7 +3094,7 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
   else frame_delay.exchange  (0);
 
 
-  if (_pDevice.p == nullptr)
+  if (_pDevice.p == nullptr || pNativeQueue.p != nullptr)
   {
     // TODO: Figure out why 32-bit D3D12 crashes when
     // pNativeDev12 is placed below _pCommandQueue...
@@ -2995,7 +3109,7 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
     }
 
     if (SK_slGetNativeInterface (_pDevice.p, (void **)&pNativeDev12.p) == sl::Result::eOk)
-                                 _pDevice =            pNativeDev12;
+        _ExchangeProxyForNative (_pDevice,             pNativeDev12);
   }
 
   if (_pDevice.p != nullptr)
@@ -3006,7 +3120,7 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
     SK_RenderBackend& rb =
       SK_GetCurrentRenderBackend ();
 
-    if (rb.swapchain == nullptr || rb.swapchain != pSwapChain)
+    if (rb.swapchain == nullptr || rb.swapchain != pSwapChain || rb.d3d12.command_queue != _pCommandQueue || rb.d3d12.device != _pDevice)
     {
       // This is unexpected, but may happen if a game destroys its original window
       //   and then creates a new SwapChain
@@ -3034,7 +3148,7 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
 
             SK_ComPtr <ID3D12Device>                         pNativeDev12;
             if (SK_slGetNativeInterface (_pDevice, (void **)&pNativeDev12.p) == sl::Result::eOk)
-                                         _pDevice =          pNativeDev12;
+                _ExchangeProxyForNative (_pDevice,           pNativeDev12);
           }
         }
 #endif
@@ -3109,7 +3223,7 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
       ThrowIfFailed (
         _pDevice->CreateDescriptorHeap (
           std::array < D3D12_DESCRIPTOR_HEAP_DESC,                1 >
-            {          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,    swapDesc1.BufferCount * 8,
+            {          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,    std::max (swapDesc1.BufferCount * 32, 64U),
                        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, 0 }.data (),
                                        IID_PPV_ARGS (&descriptorHeaps.pComputeCopy.p)));
                               SK_D3D12_SetDebugName ( descriptorHeaps.pComputeCopy.p,
@@ -3257,6 +3371,10 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
         ThrowIfFailed (
           _pSwapChain->GetBuffer (frame.iBufferIdx,                 IID_PPV_ARGS (&frame.pBackBuffer.p)));
 
+        frame.pCmdList->SetPrivateData (SKID_D3D12ParentCmdQueue, sizeof (uintptr_t), &_pCommandQueue.p);
+        frame.pCmdList->SetPrivateData (SKID_D3D12BackbufferPtr,  sizeof (uintptr_t), &frame.pBackBuffer.p);
+        frame.pCmdList->SetPrivateData (SKID_D3D12BackbufferIdx,  sizeof (UINT),      &frame.iBufferIdx);
+
         frame.hBackBufferRTV.ptr =
                   rtvHandle.ptr + ((size_t)frame.iBufferIdx * (size_t)2)             * rtvDescriptorSize;
         frame.hBackBufferRTV_sRGB.ptr =
@@ -3384,7 +3502,7 @@ SK_D3D12_RenderCtx::init (IDXGISwapChain3 *pSwapChain, ID3D12CommandQueue *pComm
         param [0].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_VERTEX;
 
         param [1].ParameterType                       = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-        param [1].Constants.Num32BitValues            = 16;// cbuffer colorSpaceTransform : register (b0)
+        param [1].Constants.Num32BitValues            = 20;// cbuffer colorSpaceTransform : register (b0)
         param [1].ShaderVisibility                    = D3D12_SHADER_VISIBILITY_PIXEL;
 
       D3D12_DESCRIPTOR_RANGE

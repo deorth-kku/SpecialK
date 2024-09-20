@@ -640,7 +640,8 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
   std::lock_guard
        lock (SK_NvAPI_Threading->locks.Disp_HdrColorControl);
 
-  if (pHdrColorData->version > NV_HDR_COLOR_DATA_VER2)
+  if (pHdrColorData->version != NV_HDR_COLOR_DATA_VER2 &&
+      pHdrColorData->version != NV_HDR_COLOR_DATA_VER1)
   {
     SK_LOGi0 (
       L"HDR: NvAPI_Disp_HdrColorControl (...) called using a struct version (%d) SK does not understand",
@@ -650,6 +651,15 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
     {
       SK_LOG0 ( ( L"HDR:  << Ignoring NvAPI HDR because user is forcing DXGI HDR (which is better!)"
                 ), __SK_SUBSYSTEM__ );
+
+      return NVAPI_OK;
+    }
+
+    if (SK_IsModuleLoaded (L"vulkan-1.dll"))
+    {
+      SK_LOGi0 (L"Disabling D3D12/Vulkan Interop in favor of D3D11/Vulkan Interop.");
+
+      config.compatibility.disable_dx12_vk_interop = true;
 
       return NVAPI_OK;
     }
@@ -744,12 +754,12 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
   pHdrColorData->cmd == NV_HDR_CMD_SET ? HDRModeToStr (pHdrColorData->hdrMode) : " " ),
               __SK_SUBSYSTEM__ );
 
+  void SK_HDR_RunWidgetOnce (void);
+       SK_HDR_RunWidgetOnce ();
+
   const bool sk_is_overriding_hdr =
       (__SK_HDR_UserForced);
   bool game_is_engaging_native_hdr = false;
-
-  void SK_HDR_RunWidgetOnce (void);
-       SK_HDR_RunWidgetOnce ();
 
   if ( pHdrColorData->cmd     == NV_HDR_CMD_SET &&
        pHdrColorData->hdrMode == NV_HDR_MODE_UHDA_PASSTHROUGH )
@@ -817,7 +827,9 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
   if (game_is_engaging_native_hdr)
   {
     SK_HDR_RunWidgetOnce ();
-    __SK_HDR_tonemap = SK_HDR_TONEMAP_RAW_IMAGE;
+
+    if (! sk_is_overriding_hdr)
+      __SK_HDR_tonemap = SK_HDR_TONEMAP_RAW_IMAGE;
   }
 
 
@@ -878,9 +890,9 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
           { L"Limited",    NV_DYNAMIC_RANGE_CEA   },
           { L"Don't Care", NV_DYNAMIC_RANGE_AUTO  } };
 
-    SK_LOGi0 ( L"HDR:  Mode: %hs", HDRModeToStr (pHdrColorData->hdrMode) );
+    SK_LOGi1 ( L"HDR:  Mode: %hs", HDRModeToStr (pHdrColorData->hdrMode) );
 
-    SK_LOG0 ( ( L"HDR:  Max Master Luma: %7.1f, Min Master Luma: %7.5f",
+    SK_LOG1 ( ( L"HDR:  Max Master Luma: %7.1f, Min Master Luma: %7.5f",
       static_cast <double> (pHdrColorData->mastering_display_data.max_display_mastering_luminance),
       static_cast <double> (
         static_cast <double>
@@ -888,12 +900,12 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
                           )
               ), __SK_SUBSYSTEM__ );
 
-    SK_LOG0 ( ( L"HDR:  Max Avg. Luma: %7.1f, Max Luma: %7.1f",
+    SK_LOG1 ( ( L"HDR:  Max Avg. Luma: %7.1f, Max Luma: %7.1f",
       static_cast <double> (pHdrColorData->mastering_display_data.max_frame_average_light_level),
       static_cast <double> (pHdrColorData->mastering_display_data.max_content_light_level)
               ), __SK_SUBSYSTEM__ );
 
-    SK_LOG0 ( ( L"HDR:  Color ( Bit-Depth: %s, Sampling: %s ), Dynamic Range: %s",
+    SK_LOG1 ( ( L"HDR:  Color ( Bit-Depth: %s, Sampling: %s ), Dynamic Range: %s",
                 bpc_map           [pHdrColorData->hdrBpc].         c_str (),
                 color_fmt_map     [pHdrColorData->hdrColorFormat]. c_str (),
                 dynamic_range_map [pHdrColorData->hdrDynamicRange].c_str ()
@@ -1078,7 +1090,7 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
         }
       }
 
-      _Push_NvAPI_HDR_Metadata_to_DXGI_Backend ();
+      ///_Push_NvAPI_HDR_Metadata_to_DXGI_Backend ();
     }
 
     return ret;
@@ -1154,7 +1166,7 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
     rb.scanout.nvapi_hdr.bpc            = pHdrColorData->hdrBpc;
     rb.scanout.nvapi_hdr.active         =(pHdrColorData->hdrMode != NV_HDR_MODE_OFF);
 
-    _Push_NvAPI_HDR_Metadata_to_DXGI_Backend ();
+    ///_Push_NvAPI_HDR_Metadata_to_DXGI_Backend ();
   }
 
   if (inputData->version == NV_HDR_COLOR_DATA_VER1 ||
@@ -1180,33 +1192,42 @@ NvAPI_Disp_HdrColorControl_Override ( NvU32              displayId,
   return ret;
 }
 
-void
-SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::addRecord (NvDisplayHandle nv_disp, NvU32 tNow) noexcept
+bool
+SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::addRecord (NvDisplayHandle nv_disp, DXGI_FRAME_STATISTICS* pFrameStats, NvU64 tNow) noexcept
 {
   const SK_RenderBackend& rb =
     SK_GetCurrentRenderBackend ();
-
-  //
-  // In case it was not patently obvious, NvAPI is not thread-safe :)
-  //
-  //   Without these locks -- rather than a crash -- framerate would plummet
-  //     following any display topology / capability changes.
-  //
-  if (rb.stale_display_info || (! rb.gsync_state.active))
-    return;
   
   NvU32   vblank_count =     0;
   bool bHasVBlankCount = false;
 
-  static constexpr auto                                   _PollingFreqInMs = 7;
-  if (last_polled_time <= SK::ControlPanel::current_time -_PollingFreqInMs)
+  if (! pFrameStats)
   {
-    std::scoped_lock
-      lock (SK_NvAPI_Threading->locks.Disp_GetVRRInfo,
-            SK_NvAPI_Threading->locks.D3D_IsGSyncActive);
+    //
+    // In case it was not patently obvious, NvAPI is not thread-safe :)
+    //
+    //   Without these locks -- rather than a crash -- framerate would plummet
+    //     following any display topology / capability changes.
+    //
+    if (rb.stale_display_info || (! rb.gsync_state.active))
+      return false;
 
-    bHasVBlankCount =
-      (NVAPI_OK == NvAPI_GetVBlankCounter (nv_disp, &vblank_count));
+    static constexpr auto                                   _PollingFreqInMs = 3;
+    if (last_polled_time <= SK::ControlPanel::current_time -_PollingFreqInMs)
+    {
+      std::scoped_lock
+        lock (SK_NvAPI_Threading->locks.Disp_GetVRRInfo,
+              SK_NvAPI_Threading->locks.D3D_IsGSyncActive);
+
+      bHasVBlankCount =
+        (NVAPI_OK == NvAPI_GetVBlankCounter (nv_disp, &vblank_count));
+    }
+  }
+
+  else
+  {
+    bHasVBlankCount = pFrameStats->SyncRefreshCount != 0;
+    vblank_count    = pFrameStats->SyncRefreshCount;
   }
 
   if (bHasVBlankCount)
@@ -1215,7 +1236,7 @@ SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::addRecord (NvDispl
 
     head = std::min (head, (NvU32)MaxVBlankRecords-1);
 
-    if (vblank_count != records [head].vblank_count)
+    if (vblank_count > records [head].vblank_count)
     {
       if ( head == MaxVBlankRecords-1 )
            head  = 0;
@@ -1223,45 +1244,59 @@ SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::addRecord (NvDispl
 
       records [head] = { tNow, vblank_count };
     }
+
+    return true;
   }
+
+  return false;
+}
+
+void
+SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::resetStats (void) noexcept
+{
+  for (auto& record : records)
+  {
+    record.timestamp_qpc = 0;
+    record.vblank_count  = 0;
+  }
+  head                   = 0;
+  last_qpc_refreshed     = 0;
+  last_frame_sampled     = 0;
+  last_polled_time       = 0;
 }
 
 float
-SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::getVBlankHz (NvU32 tNow) noexcept
+SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::getVBlankHz (NvU64 tNow) noexcept
 {
-  auto *pLimiter =
-    SK::Framerate::GetLimiter (SK_GetCurrentRenderBackend ().swapchain, false);
-
-  // We need to trigger snapshot statistics in order to collect VBlank stats
-  //   required to show VRR effective refresh rate.
-  if (pLimiter != nullptr)
-      pLimiter->frame_history_snapshots->frame_history.calcPercentile (0.0, { 0UL, 0L });
-
   NvU32 num_vblanks_in_period = 0;
 
-  NvU32 vblank_count_min = UINT32_MAX,
+  NvU64 vblank_count_min = UINT64_MAX,
         vblank_count_max = 0;
 
-  NvU32 vblank_t0        = UINT32_MAX,
+  NvU64 vblank_t0        = UINT64_MAX,
         vblank_n         = 0;
 
-  for ( UINT record_idx = 0                ;
-             record_idx < MaxVBlankRecords ;
-           ++record_idx )
-  {
-    const auto& record =
-                records [record_idx];
+  static constexpr auto
+    _MaxWindowSizeInMs = 750UL;
 
-    if ( record.timestamp_ms != 0 &&
-         record.timestamp_ms >= (tNow - 750) ) // Use the 3/4 of a second
+  for (const auto& record : records)
+  {
+    if (vblank_t0 > record.timestamp_qpc &&
+                    record.timestamp_qpc >= tNow - SK_QpcTicksPerMs * _MaxWindowSizeInMs)
+        vblank_t0 = record.timestamp_qpc;
+  }
+
+  if (vblank_t0 > tNow)
+      vblank_t0 = tNow;
+
+  for (const auto& record : records)
+  {
+    if (record.timestamp_qpc >= vblank_t0)
     {
       ++num_vblanks_in_period;
 
-      if (       vblank_t0 > record.timestamp_ms)
-                 vblank_t0 = record.timestamp_ms;
-
-      if (        vblank_n < record.timestamp_ms)
-                  vblank_n = record.timestamp_ms;
+      if (vblank_n < record.timestamp_qpc)
+          vblank_n = record.timestamp_qpc;
 
       if (vblank_count_min > record.vblank_count)
           vblank_count_min = record.vblank_count;
@@ -1276,30 +1311,56 @@ SK_RenderBackend_V2::output_s::nvapi_ctx_s::vblank_history_s::getVBlankHz (NvU32
     return 0.0f;
 
   // Apply smoothing because these numbers are hyperactive
-  float new_average = static_cast <float> (
-                      static_cast <double> (vblank_count_max - vblank_count_min) /
-             (0.001 * static_cast <double> (vblank_n         - vblank_t0))
-                                          );
+  float new_average =
+    static_cast <float> (
+    static_cast <double> (vblank_count_max - vblank_count_min) /
+   (static_cast <double> (vblank_n         - vblank_t0)        /
+    static_cast <double> (SK_QpcFreq)));
 
   // Keep imaginary numbers out of the data set...
   if (vblank_n - vblank_t0 == 0)
     new_average = 0.0f;
 
+  const auto& rb =
+    SK_GetCurrentRenderBackend ();
+
+  const auto& signal_timing =
+    rb.displays [rb.active_display].signal.timing;
+
+  const double _MaxExpectedRefreshDbl =
+      static_cast <double> (signal_timing.vsync_freq.Numerator) /
+      static_cast <double> (signal_timing.vsync_freq.Denominator);
+
+  const float _MaxExpectedRefresh =
+    static_cast <float> (_MaxExpectedRefreshDbl);
+
+       last_average = std::min (     last_average, _MaxExpectedRefresh);
+  last_last_average = std::min (last_last_average, _MaxExpectedRefresh);
+        new_average = std::min (      new_average, _MaxExpectedRefresh);
+
   if (last_average != 0.0f)
   {
-    // Rolling-average because this is really jittery
+    // Weighted rolling-average because this is really jittery
     new_average =
-      (3.0f * last_average + 2.0f * new_average) * 0.2f;
+      (2.0f * last_average + 7.5f * new_average + 0.5f * last_last_average) * 0.1f;
   }
 
-  last_average = new_average;
+  last_last_average = last_average;
+  last_average      = new_average;
 
-  static DWORD dwLastUpdate = tNow;
-  static float fLastAverage = new_average;
+  static DWORD dwLastUpdate = SK::ControlPanel::current_time;
+  static float fLastAverage = last_average;
+  
+  if (dwLastUpdate < SK::ControlPanel::current_time - 150)
+  {   dwLastUpdate = SK::ControlPanel::current_time;
 
-  if (dwLastUpdate < tNow - 200)
-  {   dwLastUpdate = tNow;
-      fLastAverage = new_average;
+    float fNewAverage =
+      (3.0f * fLastAverage + 7.0f * last_average) * 0.1f;
+
+    if (fNewAverage > _MaxExpectedRefresh)
+        fNewAverage = _MaxExpectedRefresh;
+
+    fLastAverage = fNewAverage;
   }
 
   return fLastAverage;

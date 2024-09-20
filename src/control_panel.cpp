@@ -5355,7 +5355,7 @@ SK_ImGui_ControlPanel (void)
 
           float fVBlankHz =
             nvapi_display.vblank_counter.getVBlankHz (
-                      SK::ControlPanel::current_time );
+                            SK_QueryPerf ().QuadPart );
 
           // Is it really "active" if we can't calculate the rate?
           if (fVBlankHz == 0.0f)
@@ -8626,7 +8626,18 @@ SK_ImGui_DrawFrame ( _Unreferenced_parameter_ DWORD  dwFlags,
       screenshot_mgr.setSnipRect  ({ x,y, width,height });
       screenshot_mgr.setSnipState (SK_ScreenshotManager::SnippingComplete);
 
-      WriteULong64Release (&queued_snipped_shot, SK_GetFramesDrawn ()+2);
+      unsigned int backbuffers = 2;
+
+      SK_ComQIPtr <IDXGISwapChain1>
+          pSwapChain (rb.swapchain);
+      if (pSwapChain.p != nullptr)
+      {
+        DXGI_SWAP_CHAIN_DESC  swapDesc = {};
+        pSwapChain->GetDesc (&swapDesc);
+
+        backbuffers = std::max (2U, swapDesc.BufferCount);
+      }
+      WriteULong64Release (&queued_snipped_shot, SK_GetFramesDrawn ()+backbuffers);
     }
   }
 

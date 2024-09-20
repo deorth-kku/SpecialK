@@ -1,4 +1,4 @@
-/**
+﻿/**
  * This file is part of Special K.
  *
  * Special K is free software : you can redistribute it
@@ -39,13 +39,16 @@ SK_IWrapDStorageFactory::CreateQueue (const DSTORAGE_QUEUE_DESC *desc, REFIID ri
   if (ppv == nullptr || desc == nullptr)
     return E_POINTER;
 
+  *ppv = nullptr;
+
   DSTORAGE_QUEUE_DESC override_desc = *desc;
   
   SK_LOGi0 (
-    L"SK_IWrapDStorageFactory::CreateQueue (Priority=%ws, Name=%hs)",
+    L"SK_IWrapDStorageFactory::CreateQueue (Priority=%ws, Name=%hs, Capacity=%d)",
       SK_DStorage_PriorityToStr (desc->Priority),
                                  desc->Name != nullptr ?
-                                 desc->Name : "Unnamed" );
+                                 desc->Name : "Unnamed",
+                                 desc->Capacity);
   
   if (SK_GetCurrentGameID () == SK_GAME_ID::RatchetAndClank_RiftApart)
   {
@@ -90,6 +93,33 @@ SK_IWrapDStorageFactory::CreateQueue (const DSTORAGE_QUEUE_DESC *desc, REFIID ri
           SK_DStorage_PriorityFromStr (dstorage.get_value (L"NxStorageIndexPriority").c_str ());
       }
     }
+  }
+
+  if (SK_GetCurrentGameID () == SK_GAME_ID::FinalFantasyXVI)
+  {
+    if (override_desc.Priority == DSTORAGE_PRIORITY_REALTIME)
+    {
+      override_desc.Capacity =
+        (uint16_t)((float)override_desc.Capacity * 0.5f);
+    }
+
+    else if (override_desc.Priority == DSTORAGE_PRIORITY_HIGH)
+    {
+      override_desc.Capacity =
+        (uint16_t)((float)override_desc.Capacity * 0.75f);
+    }
+
+    else if (override_desc.Priority == DSTORAGE_PRIORITY_NORMAL)
+    {
+      override_desc.Capacity =
+        (uint16_t)((float)override_desc.Capacity * 2.0f);
+    }
+
+    //else if (override_desc.Priority == DSTORAGE_PRIORITY_LOW)
+    //{
+    //  override_desc.Capacity =
+    //    (uint16_t)((float)override_desc.Capacity * 1.25f);
+    //}
   }
 
   IDStorageQueue *pQueue = nullptr;
