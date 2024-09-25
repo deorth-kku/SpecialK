@@ -2260,11 +2260,23 @@ SK_Window_RemoveBorders (void)
     SK_SetWindowStyle   ( SK_BORDERLESS    );
     SK_SetWindowStyleEx ( SK_BORDERLESS_EX );
 
-    SK_SetWindowPos ( game_window.hWnd,
-                               SK_HWND_TOP,
-                        0, 0,
-                        0, 0,  SWP_NOZORDER     | SWP_NOREPOSITION | SWP_NOSIZE |
-                               SWP_FRAMECHANGED | SWP_NOACTIVATE   | SWP_ASYNCWINDOWPOS );
+    if (GetActiveWindow () == game_window.hWnd)
+    {
+      SK_SetWindowPos ( game_window.hWnd,
+                                 SK_HWND_TOP,
+                          0, 0,
+                          0, 0,  SWP_NOZORDER     | SWP_NOREPOSITION | SWP_NOSIZE | SWP_NOMOVE |
+                                 SWP_FRAMECHANGED );
+    }
+
+    else
+    {
+      SK_SetWindowPos ( game_window.hWnd,
+                                 SK_HWND_TOP,
+                          0, 0,
+                          0, 0,  SWP_NOZORDER     | SWP_NOREPOSITION | SWP_NOSIZE | SWP_NOMOVE |
+                                 SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS );
+    }
   }
 }
 
@@ -2278,11 +2290,23 @@ SK_Window_RestoreBorders (DWORD dwStyle, DWORD dwStyleEx)
       SK_SetWindowStyle   ( dwStyle   == 0 ? dwBorderStyle   : dwStyle   );
       SK_SetWindowStyleEx ( dwStyleEx == 0 ? dwBorderStyleEx : dwStyleEx );
 
-      SK_SetWindowPos ( game_window.hWnd,
-                                 SK_HWND_TOP,
-                          0, 0,
-                          0, 0,  SWP_NOZORDER     | SWP_NOREPOSITION | SWP_NOSIZE |
-                                 SWP_FRAMECHANGED | SWP_NOACTIVATE   | SWP_ASYNCWINDOWPOS );
+      if (GetActiveWindow () == game_window.hWnd)
+      {
+        SK_SetWindowPos ( game_window.hWnd,
+                                   SK_HWND_TOP,
+                            0, 0,
+                            0, 0,  SWP_NOZORDER     | SWP_NOREPOSITION | SWP_NOSIZE | SWP_NOMOVE |
+                                   SWP_FRAMECHANGED );
+      }
+
+      else
+      {
+        SK_SetWindowPos ( game_window.hWnd,
+                                   SK_HWND_TOP,
+                            0, 0,
+                            0, 0,  SWP_NOZORDER     | SWP_NOREPOSITION | SWP_NOSIZE | SWP_NOMOVE |
+                                   SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS );
+      }
     }
   }
 }
@@ -2393,20 +2417,20 @@ SetWindowLong_Marshall (
           game_window.actual.style =
             SK_BORDERLESS;
         }
-
+        
         else
         {
           game_window.actual.style =
             game_window.game.style;
         }
-
-        if ( SK_WindowManager::StyleHasBorder (
-              game_window.game.style          )
-           )
-        {
-          game_window.border_style =
-            game_window.game.style;
-        }
+        
+        /////if ( SK_WindowManager::StyleHasBorder (
+        /////      game_window.game.style          )
+        /////   )
+        /////{
+        /////  game_window.border_style =
+        /////    game_window.game.style;
+        /////}
 
         SK_SetWindowStyle ( game_window.actual.style,
            SetWindowLongPtr_pfn (pOrigFunc)
@@ -2433,14 +2457,17 @@ SetWindowLong_Marshall (
             game_window.game.style_ex;
         }
 
-        if ( SK_WindowManager::StyleHasBorder (
-               game_window.actual.style
-           )
-          )
-        {
-          game_window.border_style_ex =
-            game_window.game.style_ex;
-        }
+        game_window.actual.style =
+          SK_GetWindowLongPtrW (game_window.hWnd, GWL_STYLE);
+
+        ////if ( SK_WindowManager::StyleHasBorder (
+        ////       game_window.actual.style
+        ////   )
+        ////  )
+        ////{
+        ////  game_window.border_style_ex =
+        ////    game_window.game.style_ex;
+        ////}
 
         SK_SetWindowStyleEx ( game_window.actual.style_ex,
            SetWindowLongPtr_pfn (pOrigFunc) );
@@ -2661,14 +2688,14 @@ SetWindowLongPtr_Marshall (
             game_window.game.style;
         }
 
-        if ( SK_WindowManager::StyleHasBorder (
-               game_window.game.style
-             )
-           )
-        {
-          game_window.border_style =
-            game_window.game.style;
-        }
+        ////if ( SK_WindowManager::StyleHasBorder (
+        ////       game_window.game.style
+        ////     )
+        ////   )
+        ////{
+        ////  game_window.border_style =
+        ////    game_window.game.style;
+        ////}
 
         SK_SetWindowStyle ( game_window.actual.style,
                               pOrigFunc );
@@ -2694,14 +2721,17 @@ SetWindowLongPtr_Marshall (
             game_window.game.style_ex;
         }
 
-        if ( SK_WindowManager::StyleHasBorder (
-               game_window.actual.style
-             )
-           )
-        {
-          game_window.border_style_ex =
-            game_window.game.style_ex;
-        }
+        game_window.actual.style =
+          SK_GetWindowLongPtrW (game_window.hWnd, GWL_STYLE);
+
+        ////if ( SK_WindowManager::StyleHasBorder (
+        ////       game_window.actual.style
+        ////     )
+        ////   )
+        ////{
+        ////  game_window.border_style_ex =
+        ////    game_window.game.style_ex;
+        ////}
 
         SK_SetWindowStyleEx ( game_window.actual.style_ex,
                                 pOrigFunc );
@@ -2760,7 +2790,7 @@ SK_Window_WaitForAsyncSetWindowLong (void)
     if ( ++sleepy_spins > 1 )
       return;
 
-    SK_SleepEx (0, FALSE);
+    SK_SleepEx (1, FALSE);
   }
 }
 
@@ -3129,7 +3159,7 @@ SK_SetWindowStyleEx ( DWORD_PTR            dwStyleEx_ptr,
 
   // Minimal sane set of extended window styles for sane rendering
   dwStyleEx |=   WS_EX_APPWINDOW;
-  dwStyleEx &= ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYOUTRTL |
+  dwStyleEx &= ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYOUTRTL  |
                  WS_EX_RIGHT      | WS_EX_RTLREADING  | WS_EX_TOOLWINDOW);
 
   game_window.actual.style_ex = DWORD_PTR (dwStyleEx);
@@ -3297,10 +3327,16 @@ SK_AdjustBorder (void)
        ULONG_PTR (SK_BORDERLESS);
     game_window.actual.style_ex =
        ULONG_PTR (SK_BORDERLESS_EX);
+
+    // Must remove this or God of War: Ragnarok will fail SwapChain creation in FSR3
+    game_window.actual.style_ex &= ~WS_EX_TOPMOST;
   }
 
   if (game_window.attach_border)
   {
+    // Must remove this or God of War: Ragnarok will fail SwapChain creation in FSR3
+    game_window.actual.style_ex &= ~WS_EX_TOPMOST;
+
     game_window.actual.style    =
       ULONG_PTR (game_window.border_style);
     game_window.actual.style_ex =
@@ -3339,8 +3375,8 @@ SK_AdjustBorder (void)
                       origin_x, origin_y,
                       new_window.right  - new_window.left,
                       new_window.bottom - new_window.top,
-                      SWP_NOZORDER     |   SWP_NOREPOSITION   |
-                    /*SWP_FRAMECHANGED |*/ SWP_NOSENDCHANGING | SWP_NOACTIVATE );
+                      SWP_NOZORDER     | SWP_NOREPOSITION   |
+                      SWP_FRAMECHANGED | SWP_NOSENDCHANGING | SWP_NOACTIVATE );
 
     ShowWindow (game_window.hWnd, SW_SHOWNA);
   }
@@ -4172,6 +4208,12 @@ BOOL
 WINAPI
 TranslateMessage_Detour (_In_ const MSG *lpMsg)
 {
+  static bool bSkipTranslation =
+      (SK_GetCurrentGameID () == SK_GAME_ID::FinalFantasyXVI);
+
+  if (bSkipTranslation && lpMsg != nullptr && lpMsg->hwnd == game_window.hWnd)
+    return FALSE;
+
   if (SK_ImGui_WantTextCapture () && lpMsg != nullptr)
   {
     switch (lpMsg->message)
@@ -4946,8 +4988,8 @@ GetForegroundWindow_Detour (void)
   //   this would be catastrophic.
   if (game_window.hWnd != 0 && IsWindow (game_window.hWnd))
   {
-    if ((! rb.isTrueFullscreen ()) || SK_IsModuleLoaded (L"sl.dlss_g.dll"))
-    {                                    // Frame Pacing Has Problems w/o this
+    if (! rb.isTrueFullscreen ())
+    {
       if ( SK_WantBackgroundRender () || config.window.always_on_top == SmartAlwaysOnTop ||
            config.window.treat_fg_as_active )
       {
@@ -5260,6 +5302,22 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
                       _In_  WPARAM wParam,
                       _In_  LPARAM lParam )
 {
+  // @TODO: Allow PlugIns to install callbacks for window proc
+  static bool bIgnoreKeyboardAndMouse =
+    (SK_GetCurrentGameID () == SK_GAME_ID::FinalFantasyXVI);
+
+  if (bIgnoreKeyboardAndMouse)
+  {
+    if ((uMsg >= WM_KEYFIRST   && uMsg <= WM_KEYLAST)   ||
+        (uMsg >= WM_MOUSEFIRST && uMsg <= WM_MOUSELAST))
+    {
+      IsWindowUnicode (hWnd)                       ?
+       DefWindowProcW (hWnd, uMsg, wParam, lParam) :
+       DefWindowProcA (hWnd, uMsg, wParam, lParam);
+      return 0;
+    }
+  }
+
   // If we are forcing a shutdown, then route any messages through the
   //   default Win32 handler.
   if (  const bool abnormal_dll_state =
@@ -6203,6 +6261,11 @@ SK_InitWindow (HWND hWnd, bool fullscreen_exclusive)
 
   game_window.actual.style_ex =
     game_window.GetWindowLongPtr ( hWnd, GWL_EXSTYLE );
+
+
+  // Must remove this or God of War: Ragnarok will fail SwapChain creation in FSR3
+  game_window.actual.style_ex &= ~WS_EX_TOPMOST;
+
 
   const bool has_border = SK_WindowManager::StyleHasBorder (
     game_window.actual.style
@@ -7526,7 +7589,7 @@ SK_HookWinAPI (void)
                        "SetWindowLongPtrA",
                        SetWindowLongPtrA_Detour,
                        static_cast_p2p <void> (&SetWindowLongPtrA_Original) );
-
+    
     SK_CreateDLLHook2 (       L"user32",
                        "SetWindowLongPtrW",
                        SetWindowLongPtrW_Detour,
@@ -8196,6 +8259,9 @@ SK_Win32_CreateBackgroundWindow (void)
 
 bool SK_Window_OnFocusChange (HWND hWndNewTarget, HWND hWndOld)
 {
+  if (! SK_GetFramesDrawn ())
+    return true;
+
   // We don't really care about other windows, sorry ;)
   if (game_window.hWnd != 0)
   {
@@ -8235,7 +8301,7 @@ bool SK_Window_OnFocusChange (HWND hWndNewTarget, HWND hWndOld)
             bTopMost   = false; // Game will cease to be top-most
           }
 
-          else if (hWndNewTarget == game_window.hWnd)
+          else if (hWndNewTarget == game_window.hWnd && hWndNewTarget != 0)
           {
           //dll_log->Log (L"Smart Always On Top: Promotion to TopMost {0}");
             bTopMost = true; // Game is promoted to top-most

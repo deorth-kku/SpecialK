@@ -54,6 +54,16 @@ D3D12Device_CreateRenderTargetView_pfn = void
                       D3D12_CPU_DESCRIPTOR_HANDLE);
 
 using
+D3D12Device_CreateSampler_pfn = void
+(STDMETHODCALLTYPE *)(ID3D12Device*,const D3D12_SAMPLER_DESC*,
+                      D3D12_CPU_DESCRIPTOR_HANDLE);
+
+using
+D3D12Device11_CreateSampler2_pfn = void
+(STDMETHODCALLTYPE *)(ID3D12Device11*,const D3D12_SAMPLER_DESC2*,
+                      D3D12_CPU_DESCRIPTOR_HANDLE);
+
+using
 D3D12Device_GetResourceAllocationInfo_pfn = D3D12_RESOURCE_ALLOCATION_INFO
 (STDMETHODCALLTYPE *)(ID3D12Device*,UINT,UINT,const D3D12_RESOURCE_DESC*);
 
@@ -139,7 +149,7 @@ extern D3D12Device9_ShaderCacheControl_pfn
        D3D12Device9_ShaderCacheControl_Original;
 
 bool SK_D3D12_HookDeviceCreation (void);
-void SK_D3D12_InstallDeviceHooks (ID3D12Device* pDev12);
+bool SK_D3D12_InstallDeviceHooks (ID3D12Device* pDev12);
 
 static inline constexpr GUID SKID_D3D12IgnoredTextureCopy = { 0x3d5298cb, 0xd8f0,  0x7233, { 0xa1, 0x9d, 0xb1, 0xd5, 0x97, 0x92, 0x00, 0x70 } };
 

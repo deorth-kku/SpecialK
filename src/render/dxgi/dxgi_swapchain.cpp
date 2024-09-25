@@ -124,6 +124,9 @@ IWrapDXGISwapChain::RegisterDestructionCallback (void)
     E_NOTIMPL;
 }
 
+struct DECLSPEC_UUID ("ADEC44E2-61F0-45C3-AD9F-1B37379284FF")
+  IStreamlineBaseInterface : IUnknown { };
+
 // IDXGISwapChain
 HRESULT
 STDMETHODCALLTYPE
@@ -141,6 +144,14 @@ IWrapDXGISwapChain::QueryInterface (REFIID riid, void **ppvObj)
     pReal->AddRef ();
 
     return S_OK;
+  }
+
+  // Keep SwapChain wrapping the hell away from Streamline!
+  else if (riid == __uuidof (IStreamlineBaseInterface))
+  {
+    SK_LOGi1 (L"Tried to get Streamline Base Interface for a SwapChain that SK has wrapped...");
+
+    return E_NOINTERFACE;
   }
 
   else if (
@@ -317,20 +328,20 @@ IWrapDXGISwapChain::Release (void)
     auto& rb =
       SK_GetCurrentRenderBackend ();
 
+    _d3d12_rbk->drain_queue ();
+
     //  If this SwapChain is the primary one that SK is rendering to,
     //    then we must teardown our render backend to eliminate internal
     //      references preventing the SwapChain from being destroyed.
     if ( rb.swapchain.p == this ||
          rb.swapchain.p == pReal )
     {
-      rb.releaseOwnedResources ();
-
-      _d3d12_rbk->drain_queue ();
-
       // This is a hard reset, we're going to get a new cmd queue
       _d3d11_rbk->release (_d3d11_rbk->_pSwapChain);
       _d3d12_rbk->release (_d3d12_rbk->_pSwapChain);
       _d3d12_rbk->_pCommandQueue.Release ();
+
+      rb.releaseOwnedResources ();
     }
   }
 
@@ -372,8 +383,13 @@ IWrapDXGISwapChain::Release (void)
         L"was destroyed..." );
 
       // Finish up any queued presents, then re-initialize the command queue
-      _d3d12_rbk->drain_queue ();
-      _d3d12_rbk->_pCommandQueue = nullptr;
+      _d3d12_rbk->release (_d3d12_rbk->_pSwapChain);
+      _d3d12_rbk->_pCommandQueue.Release ();
+
+      auto& rb =
+        SK_GetCurrentRenderBackend ();
+
+      rb.releaseOwnedResources ();
     }
 
     //delete this;
@@ -1735,6 +1751,7 @@ SK_DXGI_SwapChain_SetFullscreenState_Impl (
       pTarget    = nullptr;
       dll_log->Log ( L"[   DXGI   ]  >> Display Override "
                      L"(Requested: Fullscreen, Using: Windowed)" );
+      SK_Window_RemoveBorders ();
     }
 
     else if (request_mode_change == mode_change_request_e::Fullscreen &&

@@ -552,6 +552,10 @@ static volatile LONG __dxgi_ready = FALSE;
 
 void WaitForInitDXGI (void)
 {
+  // Waiting while Streamline has plugins loaded would deadlock us in local injection
+  if (SK_IsModuleLoaded (L"sl.common.dll"))
+    return;
+
   // This is a hybrid spin; it will spin for up to 250 iterations before sleeping
   SK_Thread_SpinUntilFlagged (&__dxgi_ready);
 }
@@ -6712,6 +6716,40 @@ _In_opt_       IDXGIOutput                     *pRestrictToOutput,
     return E_INVALIDARG;
   }
 
+  void SK_Window_WaitForAsyncSetWindowLong (void);
+       SK_Window_WaitForAsyncSetWindowLong ();
+
+  auto ex_style =
+    SK_GetWindowLongPtrW (hWnd, GWL_EXSTYLE),
+          style =
+    SK_GetWindowLongPtrW (hWnd, GWL_STYLE);
+
+  if (ex_style & WS_EX_TOPMOST)
+  {
+    bool style_compatible = 
+      (style & (WS_POPUP   | WS_BORDER      | WS_CAPTION     |
+                WS_SYSMENU | WS_MAXIMIZEBOX | WS_MINIMIZEBOX |
+                WS_THICKFRAME)) != 0UL;
+
+    bool exstyle_compatible =
+      (ex_style & (WS_EX_CLIENTEDGE    | WS_EX_CONTEXTHELP |
+                   WS_EX_DLGMODALFRAME | WS_EX_TOOLWINDOW  |
+                   WS_EX_WINDOWEDGE)) != 0UL;
+
+    if (! (style_compatible && exstyle_compatible))
+    {
+      SK_LOGi0 (
+        L"IDXGIFactory2::CreateSwapChainForHwnd (...) called on a window with"
+        L" the extended WS_EX_TOPMOST style, which is invalid... removing style!"
+      );
+
+      SK_SetWindowLongPtrW (hWnd, GWL_EXSTYLE, ex_style & ~WS_EX_TOPMOST);
+      SK_SetWindowPos      (hWnd, SK_HWND_TOP, 0, 0, 0, 0,
+                            SWP_NOZORDER | SWP_NOREPOSITION | SWP_NOSIZE |
+                            SWP_NOMOVE   | SWP_NOACTIVATE   | SWP_NOSENDCHANGING);
+    }
+  }
+
   if (! config.render.dxgi.hooks.create_swapchain4hwnd)
   {
     return
@@ -6863,6 +6901,8 @@ _In_opt_       IDXGIOutput                     *pRestrictToOutput,
   }
 
   pDesc = &new_desc1;
+
+  _d3d12_rbk->drain_queue ();
 
   ret =
     CreateSwapChainForHwnd_Original ( This, pDevice, hWnd, pDesc, pFullscreenDesc,
@@ -8986,7 +9026,7 @@ SK_DXGI_HookSwapChain (IDXGISwapChain* pProxySwapChain)
     return;
 
   const bool bHasStreamline =
-    SK_IsModuleLoaded (L"sl.dlss_g.dll");
+    SK_IsModuleLoaded (L"sl.interposer.dll");
 
   SK_ComPtr <IDXGISwapChain> pSwapChain;
 
@@ -9198,7 +9238,7 @@ SK_DXGI_HookDevice1 (IDXGIDevice1* pProxyDevice)
     return;
 
   const bool bHasStreamline =
-    SK_IsModuleLoaded (L"sl.dlss_g.dll");
+    SK_IsModuleLoaded (L"sl.interposer.dll");
 
   SK_ComPtr <IDXGIDevice1> pDevice;
 
@@ -9351,7 +9391,7 @@ SK_DXGI_HookFactory (IDXGIFactory* pProxyFactory)
     return;
 
   const bool bHasStreamline =
-    SK_IsModuleLoaded (L"sl.dlss_g.dll");
+    SK_IsModuleLoaded (L"sl.interposer.dll");
 
   SK_ComPtr <IDXGIFactory> pFactory;
 
@@ -9553,6 +9593,9 @@ SK_DXGI_SafeCreateSwapChain ( IDXGIFactory          *pFactory,
   return E_NOTIMPL;
 }
 
+#include <render/d3d12/d3d12_device.h>
+#include <render/d3d12/d3d12_command_queue.h>
+
 DWORD
 __stdcall
 HookDXGI (LPVOID user)
@@ -9685,7 +9728,7 @@ HookDXGI (LPVOID user)
 
 
     bool    bHookSuccess   = false;
-    bool    bHasStreamline = SK_IsModuleLoaded (L"sl.dlss_g.dll");
+    bool    bHasStreamline = SK_IsModuleLoaded (L"sl.interposer.dll");
     HRESULT hr             = E_NOTIMPL;
 
     SK_ComPtr <IDXGIAdapter>
@@ -9695,7 +9738,39 @@ HookDXGI (LPVOID user)
       config.render.dxgi.debug_layer ?
            DXGI_CREATE_FACTORY_DEBUG : 0x0;
 
-    if (config.render.dxgi.debug_layer && SK_IsModuleLoaded (L"d3d12.dll"))
+    static const char* D3D12SDKPath =
+      (const char *)GetProcAddress (nullptr, "D3D12SDKPath");
+
+    static const char* szDefaultD3D12Core = R"(.\D3D12\D3D12Core.dll)";
+
+    if (D3D12SDKPath == nullptr && PathFileExistsW (LR"(D3D12\D3D12Core.dll)"))
+    {
+      D3D12SDKPath =     szDefaultD3D12Core;
+    }
+
+    if (config.render.dxgi.debug_layer && D3D12SDKPath != nullptr)
+    {
+      wchar_t                         wszD3D12CorePath [MAX_PATH] = {};
+      GetCurrentDirectoryW (MAX_PATH, wszD3D12CorePath);
+      PathAppendW          (          wszD3D12CorePath, SK_UTF8ToWideChar (D3D12SDKPath).c_str ());
+      PathAppendW          (          wszD3D12CorePath, L"D3D12Core.dll");
+
+      using D3D12GetInterface_pfn = HRESULT (WINAPI *)(REFCLSID rclsid, REFIID riid, void **ppvDebug);
+
+      D3D12GetInterface_pfn
+     _D3D12GetInterface =
+     (D3D12GetInterface_pfn)SK_GetProcAddress (wszD3D12CorePath,
+     "D3D12GetInterface");
+
+      if (_D3D12GetInterface != nullptr)
+      {
+        SK_ComPtr <ID3D12Debug>                                             pDebugD3D12;
+        if (SUCCEEDED (_D3D12GetInterface (CLSID_D3D12Debug, IID_PPV_ARGS (&pDebugD3D12.p))))
+                                                                            pDebugD3D12->EnableDebugLayer ();
+      }
+    }
+
+    else if (config.render.dxgi.debug_layer && SK_IsModuleLoaded (L"d3d12.dll"))
     {
       D3D12GetDebugInterface_pfn
      _D3D12GetDebugInterface =
@@ -9713,6 +9788,9 @@ HookDXGI (LPVOID user)
     SK_ComPtr <IDXGIFactory>                 pFactory;
     CreateDXGIFactory2_Import ( factory_flags,
           __uuidof (IDXGIFactory), (void **)&pFactory.p);
+
+            SK_slUpgradeInterface ((void **)&pFactory.p);
+
     SK_ComQIPtr    <IDXGIFactory7>           pFactory7
                                             (pFactory);
     if (pFactory7 != nullptr)
@@ -9737,8 +9815,6 @@ HookDXGI (LPVOID user)
     //   that requires NVIDIA's DXGI/Vulkan interop layer
     if (bStreamlineMode || bReShadeMode)
     {
-      SK_slUpgradeInterface ((void **)&pFactory.p);
-
       using D3D12CreateDevice_pfn =
         HRESULT (WINAPI *)( IUnknown         *pAdapter,
                             D3D_FEATURE_LEVEL MinimumFeatureLevel,
@@ -9748,6 +9824,7 @@ HookDXGI (LPVOID user)
       SK_ComPtr <ID3D12Device>       pDevice12, pNativeDevice12;
       SK_ComPtr <ID3D12CommandQueue> pCmdQueue, pNativeCmdQueue;
 
+#if 0
       D3D11CoreCreateDevice_pfn
       D3D11CoreCreateDevice = (D3D11CoreCreateDevice_pfn)SK_GetProcAddress (
              LoadLibraryExW (L"d3d11.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32),
@@ -9786,6 +9863,9 @@ HookDXGI (LPVOID user)
                             &featureLevel,
                               nullptr );
       }
+#endif
+
+      SK_LoadLibraryW (L"d3d12.dll");
       
       // Stupid NVIDIA Streamline hack; lowers software compatibility with everything else.
       //   Therfore, just it may be better to leave Streamline unsupported.
@@ -9798,6 +9878,14 @@ HookDXGI (LPVOID user)
 
         if (SUCCEEDED (D3D12CreateDevice (pAdapter0, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS (&pDevice12.p))))
         {
+          if (SK_slGetNativeInterface (pDevice12.p, (void **)&pNativeDevice12.p) == sl::Result::eOk)
+          {   _ExchangeProxyForNative (pDevice12,             pNativeDevice12);
+            SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd D3D12 Device...");
+          }
+
+          SK_D3D12_InstallDeviceHooks       (pDevice12.p);
+          SK_D3D12_InstallCommandQueueHooks (pDevice12.p);
+
           if (sl::Result::eOk == SK_slUpgradeInterface ((void **)&pDevice12.p))
             SK_LOGi0 (L"Upgraded D3D12 Device to Streamline Proxy...");
 
@@ -9807,9 +9895,6 @@ HookDXGI (LPVOID user)
             queue_desc.Type  = D3D12_COMMAND_LIST_TYPE_DIRECT;
 
           pDevice12->CreateCommandQueue (&queue_desc, IID_PPV_ARGS (&pCmdQueue.p));
-
-          if (sl::Result::eOk == SK_slUpgradeInterface ((void **)&pCmdQueue.p))
-            SK_LOGi0 (L"Upgraded D3D12 Command Queue to Streamline Proxy...");
         }
       }
 
@@ -9829,26 +9914,19 @@ HookDXGI (LPVOID user)
 
       if (bHasStreamline)
       {
-        pSwapChain.p->AddRef ();
+        if (SK_slGetNativeInterface (pFactory.p, (void **)&pNativeFactory.p) == sl::Result::eOk)
+        {   _ExchangeProxyForNative (pFactory,             pNativeFactory);
+          SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd DXGI Factory...");
+        }
 
-        if (SK_slGetNativeInterface (pSwapChain.p, (void **)&pNativeSwapChain.p) == sl::Result::eOk)
-        {   _ExchangeProxyForNative (pSwapChain,             pNativeSwapChain);
-          SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd DXGI SwapChain...");
+        if (SK_slGetNativeInterface (pDevice.p, (void **)&pNativeDevice.p) == sl::Result::eOk)
+        {   _ExchangeProxyForNative (pDevice,             pNativeDevice);
+          SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd D3D11 Device...");
+        }
 
-          if (SK_slGetNativeInterface (pFactory.p, (void **)&pNativeFactory.p) == sl::Result::eOk)
-          {   _ExchangeProxyForNative (pFactory,             pNativeFactory);
-            SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd DXGI Factory...");
-          }
-
-          if (SK_slGetNativeInterface (pDevice.p, (void **)&pNativeDevice.p) == sl::Result::eOk)
-          {   _ExchangeProxyForNative (pDevice,             pNativeDevice);
-            SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd D3D11 Device...");
-          }
-
-          if (SK_slGetNativeInterface (pImmediateContext.p, (void **)&pNativeImmediateContext.p) == sl::Result::eOk)
-          {   _ExchangeProxyForNative (pImmediateContext,             pNativeImmediateContext);
-            SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd D3D11 Immediate Context...");
-          }
+        if (SK_slGetNativeInterface (pImmediateContext.p, (void **)&pNativeImmediateContext.p) == sl::Result::eOk)
+        {   _ExchangeProxyForNative (pImmediateContext,             pNativeImmediateContext);
+          SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd D3D11 Immediate Context...");
         }
       }
 
@@ -9888,8 +9966,6 @@ HookDXGI (LPVOID user)
 
       if (SUCCEEDED (hr))
       {
-        SK_DXGI_SafeCreateSwapChain (pFactory, pDevice.p, &desc, &pSwapChain.p);
-
         if (SK_slGetNativeInterface (pFactory, (void **)&pNativeFactory.p) == sl::Result::eOk)
             _ExchangeProxyForNative (pFactory,           pNativeFactory);
 
@@ -9899,8 +9975,7 @@ HookDXGI (LPVOID user)
         if (SK_slGetNativeInterface (pImmediateContext.p, (void **)&pNativeImmediateContext.p) == sl::Result::eOk)
             _ExchangeProxyForNative (pImmediateContext,             pNativeImmediateContext);
 
-        if (SK_slGetNativeInterface (pSwapChain.p, (void **)&pNativeSwapChain.p) == sl::Result::eOk)
-            _ExchangeProxyForNative (pSwapChain,             pNativeSwapChain);
+        SK_DXGI_SafeCreateSwapChain (pFactory, pDevice.p, &desc, &pSwapChain.p);
 
         sk_hook_d3d11_t d3d11_hook_ctx =
           { &pDevice.p, &pImmediateContext.p };
@@ -9916,6 +9991,11 @@ HookDXGI (LPVOID user)
     {
       if (pSwapChain != nullptr)
       {
+        if (SK_slGetNativeInterface (pSwapChain.p, (void **)&pNativeSwapChain.p) == sl::Result::eOk) {
+                                     pSwapChain.p->AddRef (); // Leak the SwapChain to avoid crashes in Nixxes games
+            _ExchangeProxyForNative (pSwapChain,             pNativeSwapChain);
+        }
+
         SK_DXGI_HookSwapChain (pSwapChain);
       }
 
@@ -10883,7 +10963,7 @@ SK_DXGI_QuickHook (void)
     __SK_DisableQuickHook = TRUE;
   }
 
-  if ( SK_IsModuleLoaded (L"sl.dlss_g.dll") )
+  if ( SK_IsModuleLoaded (L"sl.interposer.dll") )
   {
     SK_LOGi0 (L" # DXGI QuickHook disabled because an NVIDIA Streamline Interposer is present...");
 
