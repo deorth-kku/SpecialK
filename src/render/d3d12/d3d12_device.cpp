@@ -55,8 +55,6 @@ D3D12Device_CreateRenderTargetView_pfn
 D3D12Device_CreateRenderTargetView_Original      = nullptr;
 D3D12Device_CreateSampler_pfn
 D3D12Device_CreateSampler_Original               = nullptr;
-D3D12Device11_CreateSampler2_pfn
-D3D12Device11_CreateSampler2_Original            = nullptr;
 D3D12Device_GetResourceAllocationInfo_pfn
 D3D12Device_GetResourceAllocationInfo_Original   = nullptr;
 D3D12Device_CreateCommittedResource_pfn
@@ -75,6 +73,12 @@ D3D12Device4_CreateCommittedResource1_Original   = nullptr;
 
 D3D12Device8_CreateCommittedResource2_pfn
 D3D12Device8_CreateCommittedResource2_Original   = nullptr;
+
+// This is pretty new, and we don't need it... allow builds to skip it
+#ifdef __ID3D12Device11_INTERFACE_DEFINED__
+D3D12Device11_CreateSampler2_pfn
+D3D12Device11_CreateSampler2_Original            = nullptr;
+#endif
 
 concurrency::concurrent_unordered_set <ID3D12PipelineState*> _criticalVertexShaders;
 concurrency::concurrent_unordered_map <ID3D12PipelineState*, bool> _vertexShaders;
@@ -1300,27 +1304,29 @@ _In_  D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor)
       case D3D12_FILTER_MIN_MAG_MIP_LINEAR:
         desc.Filter = D3D12_FILTER_ANISOTROPIC;
         break;
-      case D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT:
-        desc.Filter = D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT;
-        break;
       case D3D12_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR:
         desc.Filter = D3D12_FILTER_COMPARISON_ANISOTROPIC;
-        break;
-      case D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT:
-        desc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_ANISOTROPIC_MIP_POINT;
         break;
       case D3D12_FILTER_MINIMUM_MIN_MAG_MIP_LINEAR:
         desc.Filter = D3D12_FILTER_MINIMUM_ANISOTROPIC;
         break;
-      case D3D12_FILTER_MINIMUM_MIN_MAG_LINEAR_MIP_POINT:
-        desc.Filter = D3D12_FILTER_MINIMUM_MIN_MAG_ANISOTROPIC_MIP_POINT;
-        break;
       case D3D12_FILTER_MAXIMUM_MIN_MAG_MIP_LINEAR:
         desc.Filter = D3D12_FILTER_MAXIMUM_ANISOTROPIC;
+        break;
+#ifdef __ID3D12Device11_INTERFACE_DEFINED__
+      case D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT:
+        desc.Filter = D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT;
+        break;
+      case D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT:
+        desc.Filter = D3D12_FILTER_COMPARISON_MIN_MAG_ANISOTROPIC_MIP_POINT;
+        break;
+      case D3D12_FILTER_MINIMUM_MIN_MAG_LINEAR_MIP_POINT:
+        desc.Filter = D3D12_FILTER_MINIMUM_MIN_MAG_ANISOTROPIC_MIP_POINT;
         break;
       case D3D12_FILTER_MAXIMUM_MIN_MAG_LINEAR_MIP_POINT:
         desc.Filter = D3D12_FILTER_MAXIMUM_MIN_MAG_ANISOTROPIC_MIP_POINT;
         break;
+#endif
       default:
         break;
     }
@@ -1329,13 +1335,15 @@ _In_  D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor)
   switch (desc.Filter)
   {
     case D3D12_FILTER_ANISOTROPIC:
-    case D3D12_FILTER_MIN_MAG_ANISOTROPIC_MIP_POINT:
-    case D3D12_FILTER_COMPARISON_MIN_MAG_ANISOTROPIC_MIP_POINT:
     case D3D12_FILTER_COMPARISON_ANISOTROPIC:
-    case D3D12_FILTER_MINIMUM_MIN_MAG_ANISOTROPIC_MIP_POINT:
     case D3D12_FILTER_MINIMUM_ANISOTROPIC:
-    case D3D12_FILTER_MAXIMUM_MIN_MAG_ANISOTROPIC_MIP_POINT:
     case D3D12_FILTER_MAXIMUM_ANISOTROPIC:
+#ifdef __ID3D12Device11_INTERFACE_DEFINED__
+    case D3D12_FILTER_MIN_MAG_LINEAR_MIP_POINT:
+    case D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT:
+    case D3D12_FILTER_MINIMUM_MIN_MAG_LINEAR_MIP_POINT:
+    case D3D12_FILTER_MAXIMUM_MIN_MAG_LINEAR_MIP_POINT:
+#endif
       if (config.render.d3d12.max_anisotropy > 0)
         desc.MaxAnisotropy = (UINT)config.render.d3d12.max_anisotropy;
       break;
@@ -1348,6 +1356,8 @@ _In_  D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor)
                                                         nullptr : &desc, DestDescriptor);
 }
 
+// This is pretty new, and we don't need it... allow builds to skip it
+#ifdef __ID3D12Device11_INTERFACE_DEFINED__
 void
 STDMETHODCALLTYPE
 D3D12Device11_CreateSampler2_Detour (
@@ -1415,6 +1425,7 @@ _In_  D3D12_CPU_DESCRIPTOR_HANDLE DestDescriptor)
     D3D12Device11_CreateSampler2_Original (This, (pDesc == nullptr) ?
                                                            nullptr : &desc, DestDescriptor);
 }
+#endif
 
 D3D12_RESOURCE_ALLOCATION_INFO
 STDMETHODCALLTYPE
@@ -2749,6 +2760,8 @@ _InstallDeviceHooksImpl (ID3D12Device* pDevice12)
   //---------------
   // 79 CreateSampler2
 
+// This is pretty new, and we don't need it... allow builds to skip it
+#ifdef __ID3D12Device11_INTERFACE_DEFINED__
   SK_ComQIPtr <ID3D12Device11>
       pDevice11 (pDev12);
   if (pDevice11.p != nullptr)
@@ -2758,6 +2771,7 @@ _InstallDeviceHooksImpl (ID3D12Device* pDevice12)
                               D3D12Device11_CreateSampler2_Detour,
                     (void **)&D3D12Device11_CreateSampler2_Original );
   }
+#endif
 
   //
   // Extra hooks are needed to handle SwapChain backbuffer copies between
