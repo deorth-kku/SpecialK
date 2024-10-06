@@ -873,8 +873,9 @@ struct sk_config_t
     } hdr;
 
     struct {
-      bool force_anisotropic           = false;
-      int  max_anisotropy              = -1;
+      bool  force_anisotropic          = false;
+      int   max_anisotropy             = -1;
+      float force_lod_bias             = 0.0f;
     } d3d12;
   } render;
 
@@ -1242,6 +1243,7 @@ struct sk_config_t
     bool     disable_dx12_vk_interop  = false;
     bool     reshade_mode             = false;
     bool     fsr3_mode                = false;
+    bool     allow_fake_streamline    =  true;
   } compatibility;
 
   struct apis_s {
@@ -1337,6 +1339,7 @@ struct sk_config_t
     int     minimum_render_prio = THREAD_PRIORITY_ABOVE_NORMAL;
     DWORD   available_cpu_cores =   1UL;
     int64_t cpu_affinity_mask   = 0xFFFFFFFFFFFFFFFFULL;
+    bool    perf_cores_only     = false;
   } priority;
 
   struct skif_s {
@@ -1683,6 +1686,7 @@ enum class SK_GAME_ID
   StarWarsOutlaws,              // outlaws.exe
   ShadPS4,                      // shadPS4.exe
   GodOfWarRagnarok,             // GoWR.exe
+  Metaphor,                     // METAPHOR.exe
 
   UNKNOWN_GAME               = 0xffff
 };

@@ -457,10 +457,20 @@ SK_DXGI_PickHDRFormat ( DXGI_FORMAT fmt_orig, BOOL bWindowed,
 
   // Hack to prevent NV's Vulkan/DXGI Interop SwapChain from destroying itself
   //   if HDR is not enabled.
-  if (config.apis.NvAPI.vulkan_bridge == 1 && GetModuleHandle (L"vulkan-1.dll"))
+  if (sk::NVAPI::nv_hardware && config.apis.NvAPI.vulkan_bridge == 1 && GetModuleHandle (L"vulkan-1.dll"))
   {
-    TenBitSwap                       = true;
-    config.render.output.force_10bpc = true;
+    // In case we are on a system with both AMD and NV GPUs, check
+    //   for AMD's Vulkan layer as an indication to bail-out
+    const bool bIsAMD =
+      SK_IsModuleLoaded (
+        SK_RunLHIfBitness (64, L"amdvlk64.dll",
+                               L"amdvlk32.dll"));
+
+    if (! bIsAMD)
+    {
+      TenBitSwap                       = true;
+      config.render.output.force_10bpc = true;
+    }
   }
 
   DXGI_FORMAT fmt_new = fmt_orig;
@@ -550,14 +560,23 @@ DWORD dwRenderThread = 0x0000;
 
 static volatile LONG __dxgi_ready = FALSE;
 
-void WaitForInitDXGI (void)
+bool WaitForInitDXGI (DWORD dwTimeout)
 {
   // Waiting while Streamline has plugins loaded would deadlock us in local injection
   if (SK_IsModuleLoaded (L"sl.common.dll"))
-    return;
+  {
+    SK_Thread_SpinUntilFlaggedEx (&__dxgi_ready, 250UL);
+  }
 
-  // This is a hybrid spin; it will spin for up to 250 iterations before sleeping
-  SK_Thread_SpinUntilFlagged (&__dxgi_ready);
+  else
+  {
+    if (dwTimeout != INFINITE)
+         SK_Thread_SpinUntilFlaggedEx (&__dxgi_ready, dwTimeout);
+    else SK_Thread_SpinUntilFlagged   (&__dxgi_ready);
+  }
+
+  return
+    ReadAcquire (&__dxgi_ready);
 }
 
 DWORD __stdcall HookDXGI (LPVOID user);
@@ -1113,6 +1132,8 @@ SK_GetDXGIFactoryInterfaceVer (gsl::not_null <IUnknown *> pFactory)
     dxgi_caps.swapchain.allow_tearing =
       SUCCEEDED (hr) && dxgi_caps.swapchain.allow_tearing;
 
+    dxgi_caps.init.store (true);
+
     return 7;
   }
 
@@ -1134,6 +1155,8 @@ SK_GetDXGIFactoryInterfaceVer (gsl::not_null <IUnknown *> pFactory)
 
     dxgi_caps.swapchain.allow_tearing =
       SUCCEEDED (hr) && dxgi_caps.swapchain.allow_tearing;
+
+    dxgi_caps.init.store (true);
 
     return 6;
   }
@@ -1157,6 +1180,8 @@ SK_GetDXGIFactoryInterfaceVer (gsl::not_null <IUnknown *> pFactory)
     dxgi_caps.swapchain.allow_tearing =
       SUCCEEDED (hr) && dxgi_caps.swapchain.allow_tearing;
 
+    dxgi_caps.init.store (true);
+
     return 5;
   }
 
@@ -1168,6 +1193,9 @@ SK_GetDXGIFactoryInterfaceVer (gsl::not_null <IUnknown *> pFactory)
     dxgi_caps.present.flip_sequential = true;
     dxgi_caps.present.waitable        = true;
     dxgi_caps.present.flip_discard    = true;
+    
+    dxgi_caps.init.store (true);
+
     return 4;
   }
 
@@ -1178,6 +1206,9 @@ SK_GetDXGIFactoryInterfaceVer (gsl::not_null <IUnknown *> pFactory)
     dxgi_caps.device.latency_control  = true;
     dxgi_caps.present.flip_sequential = true;
     dxgi_caps.present.waitable        = true;
+
+    dxgi_caps.init.store (true);
+
     return 3;
   }
 
@@ -1187,6 +1218,9 @@ SK_GetDXGIFactoryInterfaceVer (gsl::not_null <IUnknown *> pFactory)
     dxgi_caps.device.enqueue_event    = true;
     dxgi_caps.device.latency_control  = true;
     dxgi_caps.present.flip_sequential = true;
+
+    dxgi_caps.init.store (true);
+
     return 2;
   }
 
@@ -1194,12 +1228,17 @@ SK_GetDXGIFactoryInterfaceVer (gsl::not_null <IUnknown *> pFactory)
     pFactory->QueryInterface <IDXGIFactory1> ((IDXGIFactory1 **)(void **)&pTemp)))
   {
     dxgi_caps.device.latency_control  = true;
+
+    dxgi_caps.init.store (true);
+
     return 1;
   }
 
   if (SUCCEEDED (
     pFactory->QueryInterface <IDXGIFactory> ((IDXGIFactory **)(void **)&pTemp)))
   {
+    dxgi_caps.init.store (true);
+
     return 0;
   }
 
@@ -1851,6 +1890,23 @@ SK_D3D11_InsertDuplicateFrame (int MakeBreak = 0)
   return E_UNEXPECTED;
 }
 
+// NVIDIA-only feature for now
+//
+void
+SK_Framerate_AutoVRRCheckpoint (void)
+{
+  if (sk::NVAPI::nv_hardware)
+  {
+    // PresentMon is needed to handle these two cases
+    if ((config.render.framerate.auto_low_latency.waiting) ||
+        (config.render.framerate.auto_low_latency.triggered && config.render.framerate.auto_low_latency.policy.auto_reapply))
+    {
+      extern void SK_SpawnPresentMonWorker (void);
+      SK_RunOnce (SK_SpawnPresentMonWorker (); config.apis.NvAPI.implicit_gsync = true;);
+    }
+  }
+}
+
 void
 SK_D3D11_PostPresent (ID3D11Device* pDev, IDXGISwapChain* pSwap, HRESULT hr)
 {
@@ -1862,8 +1918,8 @@ SK_D3D11_PostPresent (ID3D11Device* pDev, IDXGISwapChain* pSwap, HRESULT hr)
     UINT currentBuffer = 0;
 
     bool __WantGSyncUpdate =
-      ( (config.fps.show && config.osd.show ) || SK_ImGui_Visible || std::exchange (config.apis.NvAPI.implicit_gsync, false) || (SK_GetFramesDrawn () < 120 && config.render.framerate.auto_low_latency.waiting) )
-                         && ReadAcquire (&__SK_NVAPI_UpdateGSync) != 0;
+      ( (config.fps.show && config.osd.show ) || SK_ImGui_Visible || config.apis.NvAPI.implicit_gsync || config.render.framerate.auto_low_latency.waiting ) &&
+                                                                 ReadAcquire (&__SK_NVAPI_UpdateGSync) != 0;
 
     if (__WantGSyncUpdate)
     {
@@ -1883,6 +1939,7 @@ SK_D3D11_PostPresent (ID3D11Device* pDev, IDXGISwapChain* pSwap, HRESULT hr)
         {
           rb.gsync_state.update ();
           InterlockedExchange (&__SK_NVAPI_UpdateGSync, FALSE);
+                      config.apis.NvAPI.implicit_gsync = false;
         }
 
         else rb.surface.dxgi = nullptr;
@@ -1894,6 +1951,8 @@ SK_D3D11_PostPresent (ID3D11Device* pDev, IDXGISwapChain* pSwap, HRESULT hr)
     SK_Screenshot_ProcessQueue  (SK_ScreenshotStage::ClipboardOnly, rb);
     SK_Screenshot_ProcessQueue  (SK_ScreenshotStage::_FlushQueue,   rb);
     SK_D3D11_TexCacheCheckpoint (                                     );
+
+    SK_Framerate_AutoVRRCheckpoint ();
 
     if (__SK_BFI)
     {
@@ -1920,6 +1979,8 @@ SK_D3D12_PostPresent (ID3D12Device* pDev, IDXGISwapChain* pSwap, HRESULT hr)
     SK_Screenshot_ProcessQueue  (SK_ScreenshotStage::EndOfFrame,    rb);
     SK_Screenshot_ProcessQueue  (SK_ScreenshotStage::ClipboardOnly, rb);
     SK_Screenshot_ProcessQueue  (SK_ScreenshotStage::_FlushQueue,   rb);
+
+    SK_Framerate_AutoVRRCheckpoint ();
   }
 }
 
@@ -2076,7 +2137,7 @@ SK_ImGui_DrawD3D11 (IDXGISwapChain* This)
       This->GetDesc (&swapDesc);
 
       if (IsWindow (swapDesc.OutputWindow) &&
-                    swapDesc.OutputWindow != 0)
+                    swapDesc.OutputWindow != game_window.hWnd)
       {
         SK_RunOnce (SK_InstallWindowHook (swapDesc.OutputWindow));
       }
@@ -5099,24 +5160,24 @@ SK_DXGI_CreateSwapChain_PreInit (
           case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
             SK_LOGs0 ( L" DXGI 1.2 ",
                        L" >> sRGB (B8G8R8A8) Override Required to Enable Flip Model" );
-            rb.srgb_stripped                  = true;
-            rb.active_traits.bOriginallysRGB  = true;
-            [[fallthrough]];
+            rb.srgb_stripped                 = true;
+            rb.active_traits.bOriginallysRGB = true;
+            pDesc->BufferDesc.Format         = DXGI_FORMAT_R10G10B10A2_UNORM;
+            break;//[[fallthrough]];
           case DXGI_FORMAT_B8G8R8A8_UNORM:
-          case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+          case DXGI_FORMAT_B8G8R8A8_TYPELESS: // WTF? Should be typed...
             pDesc->BufferDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
             break;
           case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
-            pDesc->BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
             SK_LOGs0 ( L" DXGI 1.2 ",
                        L" >> sRGB (R8G8B8A8) Override Required to Enable Flip Model" );
 
             rb.srgb_stripped                 = true;
             rb.active_traits.bOriginallysRGB = true;
-            [[fallthrough]];
+            pDesc->BufferDesc.Format         = DXGI_FORMAT_R10G10B10A2_UNORM;
+            break;//[[fallthrough]];
           case DXGI_FORMAT_R8G8B8A8_UNORM:
-          case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+          case DXGI_FORMAT_R8G8B8A8_TYPELESS: // WTF? Should be typed...
             pDesc->BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
             break;        }
 
@@ -5136,7 +5197,9 @@ SK_DXGI_CreateSwapChain_PreInit (
       if (config.render.output.force_10bpc && (! __SK_HDR_16BitSwap))
       {
         if ( DirectX::MakeTypeless (pDesc->BufferDesc.Format) ==
-             DirectX::MakeTypeless (DXGI_FORMAT_R8G8B8A8_UNORM) )
+             DirectX::MakeTypeless (DXGI_FORMAT_R8G8B8A8_UNORM) || 
+             DirectX::MakeTypeless (pDesc->BufferDesc.Format) ==
+             DirectX::MakeTypeless (DXGI_FORMAT_B8G8R8A8_UNORM) )
         {
           SK_LOGi0 ( L" >> 8-bpc format (%hs) replaced with "
                      L"DXGI_FORMAT_R10G10B10A2_UNORM for 10-bpc override",
@@ -5495,13 +5558,16 @@ SK_DXGI_CreateSwapChain_PostInit (
   _In_  DXGI_SWAP_CHAIN_DESC  *pDesc,
   _In_  IDXGISwapChain       **ppSwapChain )
 {
+  SK_ReleaseAssert (pDesc != nullptr);
+
+  if (pDesc == nullptr)
+    return;
+
   SK_RenderBackend& rb =
     SK_GetCurrentRenderBackend ();
 
-  wchar_t wszClass [MAX_PATH + 2] = { };
-
-  if (pDesc != nullptr)
-    RealGetWindowClassW (pDesc->OutputWindow, wszClass, MAX_PATH);
+  wchar_t                                   wszClass [MAX_PATH + 2] = { };
+  RealGetWindowClassW (pDesc->OutputWindow, wszClass, MAX_PATH);
 
   bool dummy_window =
     SK_Win32_IsDummyWindowClass (pDesc->OutputWindow) ||
@@ -5510,11 +5576,11 @@ SK_DXGI_CreateSwapChain_PostInit (
                                ( pDesc->BufferDesc.Width  == 176 &&
                                  pDesc->BufferDesc.Height == 1 );
 
-  if ( (! dummy_window) && pDesc != nullptr
-     )
+  if (! dummy_window)
   {
+    
     HWND hWndDevice = pDesc->OutputWindow;
-    HWND hWndRoot   = GetAncestor (hWndDevice, GA_ROOT);
+    HWND hWndRoot   = GetAncestor (pDesc->OutputWindow, GA_ROOTOWNER);
 
     auto& windows =
       rb.windows;
@@ -5575,28 +5641,13 @@ SK_DXGI_CreateSwapChain_PostInit (
   auto width  = client.right  - client.left;
   auto height = client.bottom - client.top;
 
-  if (pDesc != nullptr)
-  {
-    if (                   pDesc->BufferDesc.Width != 0)
-         SK_SetWindowResX (pDesc->BufferDesc.Width);
-    else SK_SetWindowResX (                  width);
+  if (                   pDesc->BufferDesc.Width != 0)
+       SK_SetWindowResX (pDesc->BufferDesc.Width);
+  else SK_SetWindowResX (                  width);
 
-    if (                   pDesc->BufferDesc.Height != 0)
-         SK_SetWindowResY (pDesc->BufferDesc.Height);
-    else SK_SetWindowResY (                  height);
-  }
-
-  else
-  {
-    if (width > 0 && height > 0)
-    {
-      SK_SetWindowResX (width);
-      SK_SetWindowResY (height);
-    }
-
-    // Should never happen under normal circumstances
-    SK_ReleaseAssert (width > 0 && height > 0);
-  }
+  if (                   pDesc->BufferDesc.Height != 0)
+       SK_SetWindowResY (pDesc->BufferDesc.Height);
+  else SK_SetWindowResY (                  height);
 
   if (  ppSwapChain != nullptr &&
        *ppSwapChain != nullptr )
@@ -5630,8 +5681,7 @@ SK_DXGI_CreateSwapChain_PostInit (
   {
     g_pD3D11Dev = pDev;
 
-    if (pDesc != nullptr)
-      rb.fullscreen_exclusive = (! pDesc->Windowed);
+    rb.fullscreen_exclusive = (! pDesc->Windowed);
   }
 
   if (rb.fullscreen_exclusive)
@@ -5818,10 +5868,13 @@ void SK_DXGI_HookDevice1     (IDXGIDevice1    *pDevice1);
 void
 SK_DXGI_LazyHookFactory (IDXGIFactory *pFactory)
 {
-  SK_RunOnce ({
-    SK_DXGI_HookFactory (pFactory);
-    SK_ApplyQueuedHooks (        );
-  });
+  if (pFactory != nullptr)
+  {
+    SK_RunOnce ({
+      SK_DXGI_HookFactory (pFactory);
+      SK_ApplyQueuedHooks (        );
+    });
+  }
 }
 
 void
@@ -6177,6 +6230,8 @@ DXGIFactory_CreateSwapChain_Override (
 
     return ret;
   }
+
+  WaitForInitDXGI ();
 
   auto                 orig_desc =  pDesc;
   DXGI_SWAP_CHAIN_DESC new_desc  = *pDesc;
@@ -6798,9 +6853,9 @@ _In_opt_       IDXGIOutput                     *pRestrictToOutput,
         );
 
         SK_SetWindowLongPtrW (hWnd, GWL_EXSTYLE, ex_style & ~WS_EX_TOPMOST);
-        SK_SetWindowPos      (hWnd, SK_HWND_TOP, 0, 0, 0, 0,
-                              SWP_NOZORDER | SWP_NOREPOSITION | SWP_NOSIZE |
-                              SWP_NOMOVE   | SWP_NOACTIVATE   | SWP_NOSENDCHANGING);
+
+        if (SK_GetForegroundWindow () == hWnd)
+             SK_RealizeForegroundWindow (hWnd);
       }
     }
   }
@@ -6847,6 +6902,8 @@ _In_opt_       IDXGIOutput                     *pRestrictToOutput,
 
     return ret;
   }
+
+  WaitForInitDXGI ();
 
   auto& rb =
     SK_GetCurrentRenderBackend ();
@@ -7926,7 +7983,8 @@ WINAPI CreateDXGIFactory (REFIID   riid,
 
   if (SUCCEEDED (ret) && *ppFactory != nullptr)
   {
-    SK_DXGI_LazyHookFactory ((IDXGIFactory *)*ppFactory);
+    SK_GetDXGIFactoryInterfaceVer ((IUnknown *)*ppFactory);
+    SK_DXGI_LazyHookFactory   ((IDXGIFactory *)*ppFactory);
 
     if (config.render.dxgi.use_factory_cache)
     {
@@ -8038,6 +8096,8 @@ WINAPI CreateDXGIFactory1 (REFIID   riid,
 
   if (SUCCEEDED (ret) && pFactory_ != nullptr)
   {
+    SK_GetDXGIFactoryInterfaceVer ((IUnknown *)pFactory_);
+
 #if 0
     auto newFactory =
       new SK_IWrapDXGIFactory ();
@@ -8176,6 +8236,8 @@ WINAPI CreateDXGIFactory2 (UINT     Flags,
 
   if (SUCCEEDED (ret) && pFactory_ != nullptr)
   {
+    SK_GetDXGIFactoryInterfaceVer ((IUnknown *)pFactory_);
+
 #if 0
     auto newFactory =
       new SK_IWrapDXGIFactory ();
@@ -8398,6 +8460,41 @@ SK_HookDXGI (void)
     }
 
     SK_ApplyQueuedHooks ();
+
+
+    static auto _InitDXGIFactoryInterfaces = [&](void)
+    {
+      SK_AutoCOMInit _autocom;
+      SK_ComPtr <IDXGIFactory>                       pFactory;
+      CreateDXGIFactory (IID_IDXGIFactory, (void **)&pFactory.p);
+    };
+
+    // This is going to fail if performed from DllMain
+    if (! SK_TLS_Bottom ()->debug.in_DllMain)
+    {
+      _InitDXGIFactoryInterfaces ();
+    }
+
+    else
+    {
+      // Thus we need to use a secondary thread
+      HANDLE hSecondaryThread =
+        SK_Thread_CreateEx ([](LPVOID)->DWORD
+        {
+          _InitDXGIFactoryInterfaces ();
+
+          return 0;
+        });
+
+      // And ... wait briefly on that thread, the timeout is critical
+      //   because this could deadlock otherwise.
+      if (hSecondaryThread != 0)
+      {
+        WaitForSingleObject (hSecondaryThread, 250UL);
+        SK_CloseHandle      (hSecondaryThread);
+      }
+    }
+    
 
     if (config.apis.dxgi.d3d11.hook)
     {
@@ -9446,6 +9543,8 @@ SK_DXGI_HookFactory (IDXGIFactory* pProxyFactory)
   if (ReadAcquire (&hooked) != FALSE)
     return;
 
+  SK_GetDXGIFactoryInterfaceVer (pProxyFactory);
+
   const bool bHasStreamline =
     SK_IsModuleLoaded (L"sl.interposer.dll");
 
@@ -9794,58 +9893,57 @@ HookDXGI (LPVOID user)
       config.render.dxgi.debug_layer ?
            DXGI_CREATE_FACTORY_DEBUG : 0x0;
 
-    static const char* D3D12SDKPath =
-      (const char *)GetProcAddress (nullptr, "D3D12SDKPath");
-
-    static const char* szDefaultD3D12Core = R"(.\D3D12\D3D12Core.dll)";
-
-    if (D3D12SDKPath == nullptr && PathFileExistsW (LR"(D3D12\D3D12Core.dll)"))
+    if (config.render.dxgi.debug_layer)
     {
-      D3D12SDKPath =     szDefaultD3D12Core;
-    }
+      static const char* D3D12SDKPath =
+        (const char *)GetProcAddress (nullptr, "D3D12SDKPath");
 
-    if (config.render.dxgi.debug_layer && D3D12SDKPath != nullptr)
-    {
-      wchar_t                         wszD3D12CorePath [MAX_PATH] = {};
-      GetCurrentDirectoryW (MAX_PATH, wszD3D12CorePath);
-      PathAppendW          (          wszD3D12CorePath, SK_UTF8ToWideChar (D3D12SDKPath).c_str ());
-      PathAppendW          (          wszD3D12CorePath, L"D3D12Core.dll");
+      wchar_t    wszD3D12CorePath [MAX_PATH] = {};
+      wcsncpy_s (wszD3D12CorePath, MAX_PATH, SK_GetHostPath (), _TRUNCATE);
 
-      using D3D12GetInterface_pfn = HRESULT (WINAPI *)(REFCLSID rclsid, REFIID riid, void **ppvDebug);
-
-      D3D12GetInterface_pfn
-     _D3D12GetInterface =
-     (D3D12GetInterface_pfn)SK_GetProcAddress (wszD3D12CorePath,
-     "D3D12GetInterface");
-
-      if (_D3D12GetInterface != nullptr)
-      {
-        SK_ComPtr <ID3D12Debug>                                             pDebugD3D12;
-        if (SUCCEEDED (_D3D12GetInterface (CLSID_D3D12Debug, IID_PPV_ARGS (&pDebugD3D12.p))))
-                                                                            pDebugD3D12->EnableDebugLayer ();
+      if (D3D12SDKPath != nullptr)
+      { PathAppendW (wszD3D12CorePath, SK_UTF8ToWideChar (D3D12SDKPath).c_str ());
+        PathAppendW (wszD3D12CorePath, L"D3D12Core.dll");
+      } else {
+        PathAppendW (wszD3D12CorePath, LR"(\D3D12\D3D12Core.dll)");
       }
-    }
 
-    else if (config.render.dxgi.debug_layer && SK_IsModuleLoaded (L"d3d12.dll"))
-    {
-      D3D12GetDebugInterface_pfn
-     _D3D12GetDebugInterface =
-     (D3D12GetDebugInterface_pfn)SK_GetProcAddress (L"d3d12.dll",
-     "D3D12GetDebugInterface");
-
-      if (_D3D12GetDebugInterface != nullptr)
+      if (PathFileExistsW (wszD3D12CorePath) && SK_LoadLibraryW (wszD3D12CorePath))
       {
-        SK_ComPtr <ID3D12Debug>                                pDebugD3D12;
-        if (SUCCEEDED (_D3D12GetDebugInterface (IID_PPV_ARGS (&pDebugD3D12.p))))
-                                                               pDebugD3D12->EnableDebugLayer ();
+        using D3D12GetInterface_pfn = HRESULT (WINAPI *)(REFCLSID rclsid, REFIID riid, void **ppvDebug);
+
+        D3D12GetInterface_pfn
+       _D3D12GetInterface =
+       (D3D12GetInterface_pfn)SK_GetProcAddress (wszD3D12CorePath,
+       "D3D12GetInterface");
+
+        if (_D3D12GetInterface != nullptr)
+        {
+          SK_ComPtr <ID3D12Debug>                                             pDebugD3D12;
+          if (SUCCEEDED (_D3D12GetInterface (CLSID_D3D12Debug, IID_PPV_ARGS (&pDebugD3D12.p))))
+                                                                              pDebugD3D12->EnableDebugLayer ();
+        }
+      }
+
+      else if (SK_IsModuleLoaded (L"d3d12.dll"))
+      {
+        D3D12GetDebugInterface_pfn
+       _D3D12GetDebugInterface =
+       (D3D12GetDebugInterface_pfn)SK_GetProcAddress (L"d3d12.dll",
+       "D3D12GetDebugInterface");
+
+        if (_D3D12GetDebugInterface != nullptr)
+        {
+          SK_ComPtr <ID3D12Debug>                                pDebugD3D12;
+          if (SUCCEEDED (_D3D12GetDebugInterface (IID_PPV_ARGS (&pDebugD3D12.p))))
+                                                                 pDebugD3D12->EnableDebugLayer ();
+        }
       }
     }
 
     SK_ComPtr <IDXGIFactory>                 pFactory;
     CreateDXGIFactory2_Import ( factory_flags,
           __uuidof (IDXGIFactory), (void **)&pFactory.p);
-
-            SK_slUpgradeInterface ((void **)&pFactory.p);
 
     SK_ComQIPtr    <IDXGIFactory7>           pFactory7
                                             (pFactory);
@@ -9880,83 +9978,90 @@ HookDXGI (LPVOID user)
       SK_ComPtr <ID3D12Device>       pDevice12, pNativeDevice12;
       SK_ComPtr <ID3D12CommandQueue> pCmdQueue, pNativeCmdQueue;
 
-#if 0
-      D3D11CoreCreateDevice_pfn
-      D3D11CoreCreateDevice = (D3D11CoreCreateDevice_pfn)SK_GetProcAddress (
-             LoadLibraryExW (L"d3d11.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32),
-                              "D3D11CoreCreateDevice" );
+      if (config.compatibility.allow_fake_streamline)
+      {
+        D3D11CoreCreateDevice_pfn
+        D3D11CoreCreateDevice = (D3D11CoreCreateDevice_pfn)SK_GetProcAddress (
+               LoadLibraryExW (L"d3d11.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32),
+                                "D3D11CoreCreateDevice" );
 
-      //// Favor this codepath because it bypasses many things like ReShade, but
-      ////   it's necessary to skip this path if NVIDIA's Vk/DXGI interop layer is active
-      if (D3D11CoreCreateDevice != nullptr && (! ( SK_GetModuleHandle (L"vulkan-1.dll") ||
-                                                   SK_GetModuleHandle (L"OpenGL32.dll") ) )) 
-      {
-        hr =
-          D3D11CoreCreateDevice (
-            nullptr, pAdapter0,
-              D3D_DRIVER_TYPE_UNKNOWN, nullptr,
-                config.render.dxgi.debug_layer ?
-                     D3D11_CREATE_DEVICE_DEBUG : 0x0,
-                                levels,
-                    _ARRAYSIZE (levels),
-                      D3D11_SDK_VERSION,
-                        &pDevice.p,
-                          &featureLevel );
-      }
-      
-      else
-      {
-        hr =
-          D3D11CreateDevice_Import (
-            pAdapter0, D3D_DRIVER_TYPE_UNKNOWN,
-              nullptr,
+        //// Favor this codepath because it bypasses many things like ReShade, but
+        ////   it's necessary to skip this path if NVIDIA's Vk/DXGI interop layer is active
+        if (D3D11CoreCreateDevice != nullptr && (! ( SK_GetModuleHandle (L"vulkan-1.dll") ||
+                                                     SK_GetModuleHandle (L"OpenGL32.dll") ) )) 
+        {
+          hr =
+            D3D11CoreCreateDevice (
+              nullptr, pAdapter0,
+                D3D_DRIVER_TYPE_UNKNOWN, nullptr,
                   config.render.dxgi.debug_layer ?
                        D3D11_CREATE_DEVICE_DEBUG : 0x0,
                                   levels,
                       _ARRAYSIZE (levels),
                         D3D11_SDK_VERSION,
                           &pDevice.p,
-                            &featureLevel,
-                              nullptr );
-      }
-#endif
-
-      SK_LoadLibraryW (L"d3d12.dll");
-      
-      // Stupid NVIDIA Streamline hack; lowers software compatibility with everything else.
-      //   Therfore, just it may be better to leave Streamline unsupported.
-      if (SK_IsModuleLoaded (L"d3d12.dll"))
-      {
-        static D3D12CreateDevice_pfn
-          D3D12CreateDevice = (D3D12CreateDevice_pfn)
-            SK_GetProcAddress (L"d3d12.dll",
-                              "D3D12CreateDevice");
-
-        if (SUCCEEDED (D3D12CreateDevice (pAdapter0, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS (&pDevice12.p))))
+                            &featureLevel );
+        }
+        
+        else
         {
-          if (SK_slGetNativeInterface (pDevice12.p, (void **)&pNativeDevice12.p) == sl::Result::eOk)
-          {   _ExchangeProxyForNative (pDevice12,             pNativeDevice12);
-            SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd D3D12 Device...");
+          hr =
+            D3D11CreateDevice_Import (
+              pAdapter0, D3D_DRIVER_TYPE_UNKNOWN,
+                nullptr,
+                    config.render.dxgi.debug_layer ?
+                         D3D11_CREATE_DEVICE_DEBUG : 0x0,
+                                    levels,
+                        _ARRAYSIZE (levels),
+                          D3D11_SDK_VERSION,
+                            &pDevice.p,
+                              &featureLevel,
+                                nullptr );
+        }
+      }
+      
+      if (! config.compatibility.allow_fake_streamline)
+      {
+        SK_slUpgradeInterface ((void **)&pFactory.p);
+
+        SK_LoadLibraryW (L"d3d12.dll");
+
+        // Stupid NVIDIA Streamline hack; lowers software compatibility with everything else.
+        //   Therefore, just it may be better to leave Streamline unsupported.
+        if (SK_IsModuleLoaded (L"d3d12.dll"))
+        {
+          static D3D12CreateDevice_pfn
+            D3D12CreateDevice = (D3D12CreateDevice_pfn)
+              SK_GetProcAddress (L"d3d12.dll",
+                                "D3D12CreateDevice");
+
+          if (SUCCEEDED (D3D12CreateDevice (pAdapter0, D3D_FEATURE_LEVEL_11_1, IID_PPV_ARGS (&pDevice12.p))))
+          {
+            if (SK_slGetNativeInterface (pDevice12.p, (void **)&pNativeDevice12.p) == sl::Result::eOk)
+            {   _ExchangeProxyForNative (pDevice12,             pNativeDevice12);
+              SK_LOGi0 (L"Got Native Interface for Streamline Proxy'd D3D12 Device...");
+            }
+
+            SK_D3D12_InstallDeviceHooks       (pDevice12.p);
+            SK_D3D12_InstallCommandQueueHooks (pDevice12.p);
+
+            if (sl::Result::eOk == SK_slUpgradeInterface ((void **)&pDevice12.p))
+              SK_LOGi0 (L"Upgraded D3D12 Device to Streamline Proxy...");
+
+            D3D12_COMMAND_QUEUE_DESC
+              queue_desc       = { };
+              queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+              queue_desc.Type  = D3D12_COMMAND_LIST_TYPE_DIRECT;
+
+            pDevice12->CreateCommandQueue (&queue_desc, IID_PPV_ARGS (&pCmdQueue.p));
           }
-
-          SK_D3D12_InstallDeviceHooks       (pDevice12.p);
-          SK_D3D12_InstallCommandQueueHooks (pDevice12.p);
-
-          if (sl::Result::eOk == SK_slUpgradeInterface ((void **)&pDevice12.p))
-            SK_LOGi0 (L"Upgraded D3D12 Device to Streamline Proxy...");
-
-          D3D12_COMMAND_QUEUE_DESC
-            queue_desc       = { };
-            queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-            queue_desc.Type  = D3D12_COMMAND_LIST_TYPE_DIRECT;
-
-          pDevice12->CreateCommandQueue (&queue_desc, IID_PPV_ARGS (&pCmdQueue.p));
         }
       }
 
       if (SUCCEEDED (hr))
       {
-        pDevice->GetImmediateContext (&pImmediateContext.p);
+        if (pDevice != nullptr)
+            pDevice->GetImmediateContext (&pImmediateContext.p);
 
         if (! pDevice12)
           SK_DXGI_SafeCreateSwapChain (pFactory, pDevice.p, &desc, &pSwapChain.p);

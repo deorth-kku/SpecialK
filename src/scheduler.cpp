@@ -21,7 +21,9 @@
 
 #include <SpecialK/stdafx.h>
 
-
+#ifndef __SK_SUBSYSTEM__
+#define __SK_SUBSYSTEM__ L"Scheduling"
+#endif
 
 #define ALLOW_UNDOCUMENTED
 
@@ -1001,6 +1003,35 @@ SK_Sleep (DWORD dwMilliseconds) noexcept
 
 #define _TVFIX
 
+
+//
+// Metaphor fix
+//
+using timeBeginPeriod_pfn = MMRESULT (WINAPI *)(UINT);
+using timeEndPeriod_pfn   = MMRESULT (WINAPI *)(UINT);
+
+static timeBeginPeriod_pfn timeBeginPeriod_Original = nullptr;
+static timeEndPeriod_pfn   timeEndPeriod_Original   = nullptr;
+
+MMRESULT
+WINAPI
+timeBeginPeriod_Detour(_In_ UINT uPeriod)
+{
+  std::ignore = uPeriod;
+
+  return TIMERR_NOERROR;
+}
+
+MMRESULT
+WINAPI
+timeEndPeriod_Detour(_In_ UINT uPeriod)
+{
+  std::ignore = uPeriod;
+
+  return TIMERR_NOERROR;
+}
+
+
 DWORD
 WINAPI
 SleepEx_Detour (DWORD dwMilliseconds, BOOL bAlertable)
@@ -1317,6 +1348,26 @@ SleepEx_Detour (DWORD dwMilliseconds, BOOL bAlertable)
   }
 
   return 0;
+}
+
+using  Thrd_sleep_pfn = void (*)(const xtime*);
+static Thrd_sleep_pfn
+       Thrd_sleep_Original = nullptr;
+
+// This simple function in msvcp140 may call into
+//   kernelbase.dll directly and avoid the hook on
+//     kernel32.dll!SleepEx (...).
+void
+__cdecl
+Thrd_sleep_Detour (const xtime* x)
+{
+  DWORD dwMilliseconds =
+    static_cast <DWORD> (
+      (x->sec * 1000UL) +
+      (x->nsec / 1000000)
+    );
+
+  SleepEx_Detour (dwMilliseconds, FALSE);
 }
 
 void
@@ -1646,6 +1697,67 @@ NtSetTimerResolution_Detour
   return ret;
 }
 
+#pragma warning(push, 1)
+#pragma warning(disable : 4244)
+#include <intel/HybridDetect.h>
+
+using  SetProcessAffinityMask_pfn = BOOL (WINAPI *)(HANDLE,DWORD_PTR);
+static SetProcessAffinityMask_pfn
+       SetProcessAffinityMask_Original = nullptr;
+
+BOOL
+WINAPI
+SetProcessAffinityMask_Detour (
+  _In_ HANDLE    hProcess,
+  _In_ DWORD_PTR dwProcessAffinityMask )
+{
+  SK_LOG_FIRST_CALL
+
+  // Check virtual handle first, generally that's what games would use
+  if (              hProcess  == SK_GetCurrentProcess () ||
+      GetProcessId (hProcess) == GetCurrentProcessId  ())
+  {
+    if (config.priority.cpu_affinity_mask != UINT64_MAX)
+    {
+      static bool        logged_once = false;
+      if (std::exchange (logged_once, true) == false ||
+          config.system.log_level > 0)
+      {
+        SK_LOGi0 (
+          L"Preventing attempted change (%x) to process affinity mask.",
+            dwProcessAffinityMask
+        );
+      }
+
+      dwProcessAffinityMask =
+        config.priority.cpu_affinity_mask;
+    }
+  }
+
+  return
+    SetProcessAffinityMask_Original (hProcess, dwProcessAffinityMask);
+}
+
+BOOL
+WINAPI
+SK_SetProcessAffinityMask (
+  _In_ HANDLE    hProcess,
+  _In_ DWORD_PTR dwProcessAffinityMask )
+{
+  DWORD_PTR dwDontCare,
+            dwSystemMask;
+
+  GetProcessAffinityMask (
+   hProcess, &dwDontCare, &dwSystemMask);
+  dwProcessAffinityMask &= dwSystemMask;
+
+  if (     SetProcessAffinityMask_Original != nullptr)
+    return SetProcessAffinityMask_Original (hProcess, dwProcessAffinityMask);
+
+  return
+    SetProcessAffinityMask (hProcess, dwProcessAffinityMask);
+}
+
 void SK_Scheduler_Init (void)
 {
   SK_ICommandProcessor
@@ -1721,6 +1833,14 @@ void SK_Scheduler_Init (void)
                                SleepEx_Detour,
       static_cast_p2p <void> (&SleepEx_Original) );
 
+    if (GetModuleHandleW (L"msvcp140"))
+    {
+      SK_CreateDLLHook2 (      L"msvcp140",
+                                "_Thrd_sleep",
+                                 Thrd_sleep_Detour,
+        static_cast_p2p <void> (&Thrd_sleep_Original) );
+    }
+
     SK_CreateDLLHook2 (      L"Kernel32",
                               "SleepConditionVariableSRW",
                                SleepConditionVariableSRW_Detour,
@@ -1741,10 +1861,86 @@ void SK_Scheduler_Init (void)
                                NtWaitForMultipleObjects_Detour,
       static_cast_p2p <void> (&NtWaitForMultipleObjects_Original) );
 
+    SK_CreateDLLHook2 (      L"Kernel32",
+                              "SetProcessAffinityMask",
+                               SetProcessAffinityMask_Detour,
+      static_cast_p2p <void> (&SetProcessAffinityMask_Original) );
+
     SK_CreateDLLHook2 (      L"NtDll",
                               "NtSetTimerResolution",
                                NtSetTimerResolution_Detour,
       static_cast_p2p <void> (&NtSetTimerResolution_Original) );
+
+    //
+    // Turn these into nops because they do nothing useful,
+    //   there is more overhead calling them than there is benefit.
+    //
+    SK_CreateDLLHook2 (      L"Kernel32",
+                              "timeBeginPeriod",
+                               timeBeginPeriod_Detour,
+      static_cast_p2p <void> (&timeBeginPeriod_Original) );
+
+    SK_CreateDLLHook2 (      L"Kernel32",
+                              "timeEndPeriod",
+                               timeEndPeriod_Detour,
+      static_cast_p2p <void> (&timeEndPeriod_Original) );
+
+    if (config.priority.cpu_affinity_mask != -1)
+    {
+      SK_SetProcessAffinityMask ( GetCurrentProcess (),
+        (DWORD_PTR)config.priority.cpu_affinity_mask
+      );
+    }
+
+    HybridDetect::PROCESSOR_INFO    pinfo;
+    HybridDetect::GetProcessorInfo (pinfo);
+
+    if (pinfo.IsIntel () && pinfo.hybrid && config.priority.perf_cores_only)
+    {      
+      DWORD_PTR orig_affinity    = ULONG_PTR_MAX,
+                process_affinity = 0,
+                system_affinity  = 0;
+
+      GetProcessAffinityMask ( GetCurrentProcess (),
+                                &orig_affinity,
+                              &system_affinity );
+
+      process_affinity &=
+        pinfo.coreMasks [HybridDetect::INTEL_CORE];
+
+      SK_LOGs0 (L"Scheduler",
+        L"Intel Hybrid CPU Detected:  Performance Core Mask=%x",
+          process_affinity
+      );
+
+      SK_SetProcessAffinityMask ( GetCurrentProcess (),
+        process_affinity
+      );
+
+      // Determine number of CPU cores total, and then the subset of those
+      //   cores that the process is allowed to run threads on.
+      SYSTEM_INFO        si = { };
+      SK_GetSystemInfo (&si);
+
+      DWORD cpu_pop    = std::max (1UL, si.dwNumberOfProcessors);
+      process_affinity = 0;
+      system_affinity  = 0;
+
+      if (GetProcessAffinityMask (GetCurrentProcess (), &process_affinity,
+                                                         &system_affinity))
+      {
+        cpu_pop = 0;
+
+        for ( auto i = 0 ; i < 64 ; ++i )
+        {
+          if ((process_affinity >> i) & 0x1)
+            ++cpu_pop;
+        }
+      }
+
+      config.priority.available_cpu_cores =
+        std::max (1UL, std::min (cpu_pop, si.dwNumberOfProcessors));
+    }
 
     SK_ApplyQueuedHooks ();
 
@@ -1779,3 +1975,4 @@ SK_Scheduler_Shutdown (void)
   //SK_DisableHook (pfnSleep);
   //SK_DisableHook (pfnQueryPerformanceCounter);
 }
+#pragma warning(pop)

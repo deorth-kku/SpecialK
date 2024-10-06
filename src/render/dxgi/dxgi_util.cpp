@@ -1038,7 +1038,8 @@ SK_DXGI_LinearizeSRGB (IDXGISwapChain* pChainThatUsedToBeSRGB)
                        .apply       = FALSE,
                        .strip       = FALSE };
 
-    codec_params.apply       = (config.render.dxgi.srgb_behavior ==  1);
+    codec_params.apply       = (config.render.dxgi.srgb_behavior ==  1 ||
+                                config.render.dxgi.srgb_behavior == -2);
     codec_params.strip       = (config.render.dxgi.srgb_behavior ==  0);
     codec_params.passthrough = (config.render.dxgi.srgb_behavior == -1);
 
@@ -1262,7 +1263,7 @@ SK_D3D11_BltCopySurface ( ID3D11Texture2D *pSrcTex,
       _Return (false);
   }
 
-  SK_ReleaseAssert (DstX == 0 && DstY == 0);
+  SK_RunOnce (SK_ReleaseAssert (DstX == 0 && DstY == 0));
 
   if ( DirectX::IsCompressed (srcTexDesc.Format)           ||
        DirectX::IsCompressed (dstTexDesc.Format)           ||

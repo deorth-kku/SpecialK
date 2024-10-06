@@ -655,6 +655,12 @@ extern void BasicInit (void);
     case SK_GAME_ID::StarOcean2R:
       SK_SO2R_InitPlugin ();
       break;
+    case SK_GAME_ID::Metaphor:
+      if (config.compatibility.allow_dxdiagn)
+      {
+        SK_Metaphor_InitPlugin ();
+      }
+      break;
 #else
     case SK_GAME_ID::SecretOfMana:
       SK_SOM_InitPlugin ();
@@ -1842,6 +1848,7 @@ SK_StartupCore (const wchar_t* backend, void* callback)
   // Not a saved INI setting; use an alternate initialization
   //   strategy when Streamline is detected...
   config.compatibility.init_sync_for_streamline =
+    config.compatibility.allow_fake_streamline == false &&
     (SK_GetModuleHandleW (L"sl.interposer.dll") != 0);
 
  try
