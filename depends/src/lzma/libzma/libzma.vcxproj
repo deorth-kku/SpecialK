@@ -41,6 +41,7 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <EnableUnitySupport>false</EnableUnitySupport>
     <VCToolsVersion>14.36.32532</VCToolsVersion>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
@@ -66,6 +67,7 @@
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <EnableUnitySupport>false</EnableUnitySupport>
     <VCToolsVersion>14.36.32532</VCToolsVersion>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>

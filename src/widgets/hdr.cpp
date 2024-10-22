@@ -141,8 +141,8 @@ struct SK_HDR_PQBoostParams
   float PQBoost2;
   float PQBoost3;
   float EstimatedMaxCLLScale;
-} SK_HDR_PQBoost_v0 = { 0.5f, 30.0f, 11.5f, 1.500f, 1.0f,  570.0f },
-  SK_HDR_PQBoost_v1 = { 0.5f,  1.0f,  0.1f, 1.273f, 0.5f,  267.0f };
+} SK_HDR_PQBoost_v0 = { 0.333f, 30.0f, 11.5f, 1.500f, 1.0f,  570.0f },
+  SK_HDR_PQBoost_v1 = { 0.333f,  1.0f,  0.1f, 1.273f, 0.5f,  267.0f };
 
 bool  __SK_HDR_TonemapOverbright = true;
 float __SK_HDR_ColorBoost        = SK_HDR_PQBoost_v1.ColorBoost;
@@ -1625,7 +1625,7 @@ public:
             {
               if (cboost)
               {
-                preset.pq_colorboost = 0.5f;
+                preset.pq_colorboost = 0.333f;
               }
 
               else
@@ -2353,7 +2353,7 @@ public:
 
             const bool pboost = (preset.pq_boost0 > 0.0f);
 
-            if (abs (__SK_HDR_Luma) >= 1.0f)
+            if (abs (__SK_HDR_Luma) >= 1.0f && (! bRawImageMode))
             {
               if (ImGui::Checkbox ("Tonemap Overbright Bits", &preset.tonemap_overbright))
               {
