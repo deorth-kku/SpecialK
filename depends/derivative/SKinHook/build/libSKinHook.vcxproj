@@ -39,7 +39,7 @@
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <PreferredToolArchitecture>x64</PreferredToolArchitecture>
-    <VCToolsVersion>14.36.32532</VCToolsVersion>
+    <VCToolsVersion>14.41.34120</VCToolsVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (clang)|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
@@ -63,7 +63,7 @@
     <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
     <PreferredToolArchitecture>x64</PreferredToolArchitecture>
-    <VCToolsVersion>14.36.32532</VCToolsVersion>
+    <VCToolsVersion>14.41.34120</VCToolsVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release (clang)|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
@@ -154,7 +154,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=_WIN32_WINNT_WINBLUE;_CRT_USE_WINAPI_FAMILY_DESKTOP_APP;NTDDI_WIN7SP1=0x06010100;_WIN32_WINNT_WINTHRESHOLD=0x0A00;WIN32;_DEBUG;_LIB;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NTDDI_VERSION=NTDDI_WIN11_GE;_WIN32_WINNT=_WIN32_WINNT_WIN10;WIN32;_DEBUG;_LIB;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <WarningLevel>Level4</WarningLevel>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
@@ -212,7 +212,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=_WIN32_WINNT_WINBLUE;_CRT_USE_WINAPI_FAMILY_DESKTOP_APP;NTDDI_WIN7SP1=0x06010100;_WIN32_WINNT_WINTHRESHOLD=0x0A00;WIN32;_DEBUG;_LIB;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NTDDI_VERSION=NTDDI_WIN11_GE;_WIN32_WINNT=_WIN32_WINNT_WIN10;WIN32;_DEBUG;_LIB;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <WarningLevel>Level4</WarningLevel>
       <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
@@ -266,15 +266,15 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=_WIN32_WINNT_WINBLUE;WIN32;NDEBUG;_LIB;_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=0x0601;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <PreprocessorDefinitions>NTDDI_VERSION=WDK_NTDDI_VERSION;_WIN32_WINNT=_WIN32_WINNT_WIN10;WIN32;NDEBUG;_LIB;_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=0x0601;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <WarningLevel>Level4</WarningLevel>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
       <ExceptionHandling>Async</ExceptionHandling>
       <StringPooling>true</StringPooling>
-      <OmitFramePointers>true</OmitFramePointers>
+      <OmitFramePointers>false</OmitFramePointers>
       <CreateHotpatchableImage>true</CreateHotpatchableImage>
       <AdditionalOptions>/GS- /Gs8192 /Ob3 /Zo /Gw /GR /cgthreads8 /Zc:implicitNoexcept /Zc:strictStrings- /Zf</AdditionalOptions>
       <ProgramDataBaseFileName>$(SolutionDir)depends\lib\$(TargetName)\$(Platform)\$(TargetName).pdb</ProgramDataBaseFileName>
@@ -305,7 +305,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>SK_BUILT_BY_CLANG;WIN32;NDEBUG;_LIB;_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=0x0601;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>SK_BUILT_BY_CLANG;NTDDI_VERSION=NTDDI_WIN11_GE;_WIN32_WINNT=_WIN32_WINNT_WIN10;WIN32;NDEBUG;_LIB;_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=0x0601;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <WarningLevel>Level4</WarningLevel>
@@ -347,8 +347,8 @@
     </Midl>
     <ClCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=_WIN32_WINNT_WINBLUE;_WIN64;WIN32;NDEBUG;_LIB;_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=0x0601;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <PreprocessorDefinitions>NTDDI_VERSION=WDK_NTDDI_VERSION;_WIN32_WINNT=_WIN32_WINNT_WIN10;_WIN64;WIN32;NDEBUG;_LIB;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <WarningLevel>Level4</WarningLevel>
       <ExceptionHandling>Async</ExceptionHandling>
       <StringPooling>true</StringPooling>
@@ -393,7 +393,7 @@
     </Midl>
     <ClCompile>
       <AdditionalIncludeDirectories>%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>SK_BUILT_BY_CLANG;_WIN64;WIN32;NDEBUG;_LIB;_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=0x0601;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>SK_BUILT_BY_CLANG;NTDDI_VERSION=NTDDI_WIN11_GE;_WIN32_WINNT=_WIN32_WINNT_WIN10;_WIN64;WIN32;NDEBUG;_LIB;_WIN7_PLATFORM_UPDATE;_WIN32_WINNT=0x0601;_CRT_STDIO_ARBITRARY_WIDE_SPECIFIERS;SK_BUILD_DLL=1;SK_EXPORTS;_USRDLL;_WINDOWS;DIRECTINPUT_VERSION=0x0800;GLEW_STATIC;PSAPI_VERSION=1;_CRT_SECURE_NO_WARNINGS;_CRT_NON_CONFORMING_SWPRINTFS;_SILENCE_ALL_CXX17_DEPRECATION_WARNINGS;STRICT;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <WarningLevel>Level4</WarningLevel>
       <ExceptionHandling>Async</ExceptionHandling>

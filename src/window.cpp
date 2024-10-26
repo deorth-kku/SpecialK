@@ -35,9 +35,8 @@
 
 static constexpr int SK_MAX_WINDOW_DIM = 16384;
 
-// WS_SYSMENU keeps the window's icon unchanged
-#define SK_BORDERLESS    ( WS_VISIBLE | WS_POPUP | WS_MINIMIZEBOX | WS_SYSMENU | \
-                           WS_CLIPCHILDREN | WS_CLIPSIBLINGS )
+// WS_SYSMENU keeps the window's icon unchanged (but is invalid without WS_CAPTION!)
+#define SK_BORDERLESS    ( WS_VISIBLE | WS_POPUP | WS_MINIMIZEBOX | WS_CLIPSIBLINGS )
 #define SK_BORDERLESS_EX ( WS_EX_APPWINDOW )
 
 #define SK_LOG_LEVEL_UNTESTED
@@ -198,7 +197,14 @@ public:
     return ( ( style == 0x0            ) ||
              ( style  &  WS_BORDER     ) ||
              ( style  &  WS_THICKFRAME ) ||
-             ( style  &  WS_DLGFRAME   )    );
+             ( style  &  WS_DLGFRAME   ) ||
+             ( style  &  WS_CAPTION    ) ||
+             ( style  &  WS_SYSMENU    ) );
+  }
+
+  static constexpr bool StyleExHasBorder (DWORD_PTR style_ex)
+  {
+    return ( ( style_ex & WS_EX_CLIENTEDGE ) );
   }
 
   bool OnVarChange (SK_IVariable* var, void* val) override
@@ -3121,7 +3127,7 @@ SK_SetWindowStyle (DWORD_PTR dwStyle_ptr, SetWindowLongPtr_pfn pDispatchFunc)
   // Ensure that the border style is sane
   if (dwStyle_ptr == game_window.border_style)
   {
-    game_window.border_style |= WS_CAPTION     | WS_SYSMENU | WS_POPUP |
+    game_window.border_style |= WS_CAPTION     | WS_POPUP |
                                 WS_MINIMIZEBOX | WS_VISIBLE;
     dwStyle_ptr               = game_window.border_style;
   }
@@ -3131,7 +3137,7 @@ SK_SetWindowStyle (DWORD_PTR dwStyle_ptr, SetWindowLongPtr_pfn pDispatchFunc)
            (dwStyle_ptr & 0xFFFFFFFF);
 
   // Minimal sane set of extended window styles for sane rendering
-  dwStyle |=  ( WS_VISIBLE  | WS_SYSMENU );
+  dwStyle |=  ( WS_VISIBLE );
   dwStyle &= ~( WS_DISABLED | WS_ICONIC  | WS_CHILD );
 
   if (config.window.borderless)
@@ -3160,7 +3166,8 @@ SK_SetWindowStyleEx ( DWORD_PTR            dwStyleEx_ptr,
   // Minimal sane set of extended window styles for sane rendering
   dwStyleEx |=   WS_EX_APPWINDOW;
   dwStyleEx &= ~(WS_EX_NOACTIVATE | WS_EX_TRANSPARENT | WS_EX_LAYOUTRTL  |
-                 WS_EX_RIGHT      | WS_EX_RTLREADING  | WS_EX_TOOLWINDOW);
+                 WS_EX_RIGHT      | WS_EX_RTLREADING  | WS_EX_TOOLWINDOW |
+                 WS_EX_CLIENTEDGE);
 
   game_window.actual.style_ex = DWORD_PTR (dwStyleEx);
 
@@ -3255,6 +3262,9 @@ SK_Window_HasBorder (HWND hWnd)
   return
     SK_WindowManager::StyleHasBorder (
         DWORD_PTR (SK_GetWindowLongW ( hWnd, GWL_STYLE ))
+    ) || 
+    SK_WindowManager::StyleExHasBorder (
+        DWORD_PTR (SK_GetWindowLongW ( hWnd, GWL_EXSTYLE ))
     );
 }
 
@@ -6980,7 +6990,11 @@ SK_InstallWindowHook (HWND hWnd)
         {
           if (var->getValuePointer () == background_render)
           {
-            *background_render = *(bool *)val;
+            // It is unsafe to turn this off while Fake Fullscreen is enabled
+            if (config.render.dxgi.fake_fullscreen_mode)
+              *background_render = true;
+            else
+              *background_render = *(bool *)val;
 
             SK_Steam_ProcessWindowActivation (game_window.active);
           }
@@ -7230,10 +7244,15 @@ SK_MakeWindowHook (WNDPROC class_proc, WNDPROC wnd_proc, HWND hWnd)
     config.textures.cache.ignore_nonmipped      =  true;
     cache_opts.ignore_non_mipped                =  true; // Push this change through immediately
 
+                   
     if (changed)
     {
       config.utility.save_async ();
-      SK_RestartGame ();
+
+      // For stuff running as admin, it's unlikely a game could be relaunched
+      //   with the correct credentials...
+      if (! SK_IsAdmin ())
+        SK_RestartGame ();
     }
   }
 
