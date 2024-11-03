@@ -5422,6 +5422,44 @@ SK_D3DX11_SAFE_CreateTextureFromFileW ( ID3D11Device*           pDevice,   LPCWS
   return E_NOTIMPL;
 }
 
+#define SK_REMASTER_DESTROY_UAV_CALLBACK(bits)           \
+void __stdcall                                           \
+SK_D3D11_Remastered##bits##BitUAVDestroyed (void* size) {\
+  InterlockedDecrement (                                 \
+   &SK_HDR_UnorderedViews_##bits##bpc->TargetsUpgraded); \
+  InterlockedDecrement (                                 \
+   &SK_HDR_UnorderedViews_##bits##bpc->CandidatesSeen);  \
+  InterlockedAdd64     (                                 \
+   &SK_HDR_UnorderedViews_##bits##bpc->BytesAllocated,   \
+                                        -(int64_t)size);}\
+
+#define SK_REMASTER_DESTROY_RT_CALLBACK(bits)           \
+void __stdcall                                          \
+SK_D3D11_Remastered##bits##BitRTDestroyed (void* size) {\
+  InterlockedDecrement (                                \
+   &SK_HDR_RenderTargets_##bits##bpc->TargetsUpgraded); \
+  InterlockedDecrement (                                \
+   &SK_HDR_RenderTargets_##bits##bpc->CandidatesSeen);  \
+  InterlockedAdd64     (                                \
+   &SK_HDR_RenderTargets_##bits##bpc->BytesAllocated,   \
+                                       -(int64_t)size);}\
+
+SK_REMASTER_DESTROY_RT_CALLBACK  ( 8);
+SK_REMASTER_DESTROY_UAV_CALLBACK ( 8);
+SK_REMASTER_DESTROY_RT_CALLBACK  (10);
+SK_REMASTER_DESTROY_UAV_CALLBACK (10);
+SK_REMASTER_DESTROY_RT_CALLBACK  (11);
+SK_REMASTER_DESTROY_UAV_CALLBACK (11);
+
+#define SK_GET_REMASTER_DESTROY_UAV_CALLBACK(bits)         \
+        bits == 8  ? SK_D3D11_Remastered8BitUAVDestroyed  :\
+        bits == 10 ? SK_D3D11_Remastered10BitUAVDestroyed :\
+        bits == 11 ? SK_D3D11_Remastered11BitUAVDestroyed : nullptr
+#define SK_GET_REMASTER_DESTROY_RT_CALLBACK(bits)         \
+        bits == 8  ? SK_D3D11_Remastered8BitRTDestroyed  :\
+        bits == 10 ? SK_D3D11_Remastered10BitRTDestroyed :\
+        bits == 11 ? SK_D3D11_Remastered11BitRTDestroyed : nullptr
+
 HRESULT
 WINAPI
 D3D11Dev_CreateTexture2DCore_Impl (
@@ -5434,6 +5472,13 @@ D3D11Dev_CreateTexture2DCore_Impl (
                     LPVOID                   lpCallerAddr,
                     SK_TLS                  *pTLS )
 {
+  // Necessary hack to keep Ys X from crashing if forcefully minimized;
+  //   it would attempt to create a 0x0 texture, but that's invalid.
+  if (pDesc0 != nullptr) { pDesc0->Width  = pDesc0->Width  == 0 ? 1 : pDesc0->Width;
+                           pDesc0->Height = pDesc0->Height == 0 ? 1 : pDesc0->Height; }
+  if (pDesc1 != nullptr) { pDesc1->Width  = pDesc1->Width  == 0 ? 1 : pDesc1->Width;
+                           pDesc1->Height = pDesc1->Height == 0 ? 1 : pDesc1->Height; }
+
   ID3D11Device3*         This3 = (ID3D11Device3 *)This;
   ID3D11Texture2D1**     ppTexture2D =
                          ppTexture2D0 != nullptr ? (ID3D11Texture2D1 **)ppTexture2D0
@@ -5487,12 +5532,12 @@ D3D11Dev_CreateTexture2DCore_Impl (
   }
 #endif
 
-  SK_ComQIPtr <ID3D11Device>        pDev    (This);
-  SK_ComPtr   <ID3D11DeviceContext> pDevCtx (rb.d3d11.immediate_ctx);
+  SK_ComQIPtr <ID3D11Device> pDev (This);
+  ID3D11DeviceContext*       pDevCtx =
+    (ID3D11DeviceContext *)rb.swapchain.p;
 
   // Only from devices belonging to the game, no wrappers or Ansel
   SK_ComQIPtr <IDXGISwapChain> pSwapChain (rb.swapchain);
-
   if (rb.device.p == nullptr)
   {
     // Better late than never
@@ -5504,12 +5549,14 @@ D3D11Dev_CreateTexture2DCore_Impl (
 
         if (SUCCEEDED (pSwapChain->GetDevice (IID_PPV_ARGS (&pSwapDev.p))) && pDev.IsEqualObject (pSwapDev))
         {
-          This->GetImmediateContext (&pDevCtx.p);
+          This->GetImmediateContext (&pDevCtx);
              rb.d3d11.immediate_ctx = pDevCtx;
              rb.setDevice            (pDev);
 
           SK_LOG0 ( (L"Active D3D11 Device Context Established on first Texture Upload" ),
                      L"  D3D 11  " );
+
+          pDevCtx->Release ();
         }
       }
     }
@@ -5702,7 +5749,7 @@ D3D11Dev_CreateTexture2DCore_Impl (
                                 D3D11_BIND_SHADER_RESOURCE &&
                  pDesc->Width == swapDesc.BufferDesc.Width &&
                 pDesc->Height == swapDesc.BufferDesc.Height///&&
-              /*pDesc->Format == swapDesc.BufferDesc.Format*/))         &&
+              /*pDesc->Format == swapDesc.BufferDesc.Format*/)) &&
 #endif
            (pDesc->BindFlags & _UnwantedBindFlags) == 0 && (pDesc->MiscFlags & _UnwantedMiscFlags) == 0 && ( pDesc->Width * pDesc->Height * 8 < 512 * 1024 * 1024 ) )
        )
@@ -5716,6 +5763,8 @@ D3D11Dev_CreateTexture2DCore_Impl (
         bool is_uav =
           (pDesc->BindFlags & D3D11_BIND_UNORDERED_ACCESS) ==
                               D3D11_BIND_UNORDERED_ACCESS;
+
+        void* bytes_added = 0;
 
         SK_HDR_RenderTargetManager *p11BitTargetManager =
           is_uav ? SK_HDR_UnorderedViews_11bpc.getPtr ()
@@ -5795,12 +5844,14 @@ D3D11Dev_CreateTexture2DCore_Impl (
 
             if (bpc == 11)
             {
-              InterlockedAdd64     (&p11BitTargetManager->BytesAllocated, 4LL * pDesc->Width * pDesc->Height);
+              bytes_added = (void*)(uintptr_t)(4LL * pDesc->Width * pDesc->Height);
+              InterlockedAdd64     (&p11BitTargetManager->BytesAllocated, (uint64_t)bytes_added);
               InterlockedIncrement (&p11BitTargetManager->TargetsUpgraded);
             }
             else if (bpc == 10)
             {
-              InterlockedAdd64     (&p10BitTargetManager->BytesAllocated, 4LL * pDesc->Width * pDesc->Height);
+              bytes_added = (void*)(uintptr_t)(4LL * pDesc->Width * pDesc->Height);
+              InterlockedAdd64     (&p10BitTargetManager->BytesAllocated, (uint64_t)bytes_added);
               InterlockedIncrement (&p10BitTargetManager->TargetsUpgraded);
             }
 
@@ -5845,32 +5896,11 @@ D3D11Dev_CreateTexture2DCore_Impl (
               const bool bIgnorePartialMatches =
                 ( SK_GetCurrentGameID () == SK_GAME_ID::NieRAutomata ) ||
                 ( SK_GetCurrentGameID () == SK_GAME_ID::SonicXShadowGenerations );
-              static
-              const bool bIgnoreSquareTargets  =
-                ( SK_GetCurrentGameID () == SK_GAME_ID::SonicXShadowGenerations );
-              static
-              const bool bIgnoreMonoTargets   =
-                ( SK_GetCurrentGameID () == SK_GAME_ID::SonicXShadowGenerations );
-              static
-              const bool bIgnoreSub100Targets =
-                ( SK_GetCurrentGameID () == SK_GAME_ID::SonicXShadowGenerations );
 
-              const bool bSquareTarget = pDesc->Height == pDesc->Width;
-              const bool bMonoTarget   = bSquareTarget && pDesc->Width == 1;
-              const bool bCloseMatch   = ( pDesc->Width  <= (swapDesc.BufferDesc.Width  + 2) && pDesc->Width  >= (swapDesc.BufferDesc.Width  - 2) &&
-                                           pDesc->Height <= (swapDesc.BufferDesc.Height + 2) && pDesc->Height >= (swapDesc.BufferDesc.Height - 2) );
-
-              const bool game_specific_reqs_met =
-                SK_GetCurrentGameID () == SK_GAME_ID::SonicXShadowGenerations &&
-                        (bCloseMatch                  ||
-                      (((bMonoTarget   && (! is_uav)) ||
-                        (bSquareTarget && (! is_uav) && ImIsPowerOfTwo ((int)pDesc->Width)))));
-
+              const bool game_specific_reqs_met = false;
               if (       game_specific_reqs_met  ||
                    ( ( (! bIgnorePartialMatches) || ( pDesc->Width  == swapDesc.BufferDesc.Width &&
-                                                      pDesc->Height == swapDesc.BufferDesc.Height                    ) ) && (
-                     ( (! bIgnoreSquareTargets)  || ( (! bSquareTarget) || ( bMonoTarget && (! bIgnoreMonoTargets) ) ) ) &&
-                     ( (! bIgnoreMonoTargets)    || ( (! bMonoTarget) ) ) ) )
+                                                      pDesc->Height == swapDesc.BufferDesc.Height ) ) )
                  )
               {
                 if (p8BitTargetManager->PromoteTo16Bit)
@@ -5887,18 +5917,21 @@ D3D11Dev_CreateTexture2DCore_Impl (
                   // nb: R8G8 and R8 do not currently respect the FP->UNORM compat setting!
                   if (     _typeless == DXGI_FORMAT_R8G8_TYPELESS)
                   {
+                    bytes_added       = (void*)(uintptr_t)(2LL * pDesc->Width * pDesc->Height);
                     pDesc->Format     = DXGI_FORMAT_R16G16_FLOAT;
-                    InterlockedAdd64   (&p8BitTargetManager->BytesAllocated, 2LL * pDesc->Width * pDesc->Height);
+                    InterlockedAdd64    (&p8BitTargetManager->BytesAllocated, (uint64_t)bytes_added);
                   }
                   else if (_typeless == DXGI_FORMAT_R8_TYPELESS)
                   {
+                    bytes_added       = (void*)(uintptr_t)(1LL * pDesc->Width * pDesc->Height);
                     pDesc->Format     = DXGI_FORMAT_R16_FLOAT;
-                    InterlockedAdd64   (&p8BitTargetManager->BytesAllocated, 1LL * pDesc->Width * pDesc->Height);
+                    InterlockedAdd64    (&p8BitTargetManager->BytesAllocated, (uint64_t)bytes_added);
                   }
                   else
                   {
                     // 32-bit total -> 64-bit
-                    InterlockedAdd64   (&p8BitTargetManager->BytesAllocated, 4LL * pDesc->Width * pDesc->Height);
+                    bytes_added       = (void*)(uintptr_t)(4LL * pDesc->Width * pDesc->Height);
+                    InterlockedAdd64    (&p8BitTargetManager->BytesAllocated, (uint64_t)bytes_added);
 
                     //
                     // Sometimes rendering into an FP RenderTarget is going to produce invalid blend results,
@@ -5946,11 +5979,30 @@ D3D11Dev_CreateTexture2DCore_Impl (
 
             else
             {
-              // The actual texture pointer is optional, sometimes this function is
-              //   called simply to validate parameters.
+              // The actual texture pointer is optional, sometimes this
+              //   function is called simply to validate parameters.
               if (ppTexture2D != nullptr)
               {
+                SK_ComPtr <ID3DDestructionNotifier> pDestructionNotifier;
+                if (SUCCEEDED ((*ppTexture2D)->
+                        QueryInterface <ID3DDestructionNotifier>
+                                         (&pDestructionNotifier.p)))
+                {
+                  UINT                      destruction_callback_id = 0;
+                  pDestructionNotifier->RegisterDestructionCallback (
+                    is_uav ? SK_GET_REMASTER_DESTROY_UAV_CALLBACK (bpc):
+                             SK_GET_REMASTER_DESTROY_RT_CALLBACK  (bpc),
+                              bytes_added, &destruction_callback_id );
+                }
+
+                static int                  upgrade_num = 0;
                 SK_D3D11_FlagResourceFormatManipulated (*ppTexture2D, origDesc.Format);
+                SK_D3D11_SetDebugName                  (*ppTexture2D,
+                   SK_FormatStringW (L"[SK] Upgraded %hs %03d (%hs)",
+                                    is_uav ? "UAV" : "RT",
+                                            upgrade_num++,
+                                  SK_DXGI_FormatToStr (origDesc.Format).data () + 12));
+                                  //"DXGI_FORMAT_" = 12
               }
 
               return hr;
@@ -6020,7 +6072,8 @@ D3D11Dev_CreateTexture2DCore_Impl (
                      pInitialData->pSysMem   != nullptr &&
                      pDesc->SampleDesc.Count == 1       &&
                     (pDesc->MiscFlags        == 0x00 ||
-                     pDesc->MiscFlags        == D3D11_RESOURCE_MISC_RESOURCE_CLAMP)
+                     pDesc->MiscFlags        == D3D11_RESOURCE_MISC_RESOURCE_CLAMP ||
+                     pDesc->MiscFlags        == D3D11_RESOURCE_MISC_GENERATE_MIPS)
                                                         &&
                      //pDesc->MiscFlags        != 0x01  &&
                      pDesc->CPUAccessFlags   == 0x0     &&
@@ -8510,10 +8563,14 @@ D3D11CreateDeviceAndSwapChain_Detour (IDXGIAdapter          *pAdapter,
   if (SUCCEEDED (res) && ppDevice != nullptr && ret_device != nullptr)
   {
     // Use a single device for NVIDIA interop, it saves a ton of memory in 32-bit games.
-    if (bNvInterop)
-    {
+    if (bNvInterop || SK_GetCurrentGameID () == SK_GAME_ID::YsX)
+    {                 // Ys X cannot be allowed to cleanup the device context, or it won't exit.
       pNvInteropSingleton = ret_device;
                             ret_device->AddRef (); // Keep-Alive
+                            ret_ctx->AddRef    ();
+
+      if (rb.device == nullptr)
+          rb.setDevice (ret_device);
     }
 
     // Stash the pointer to this device so that we can test equality on wrapped devices
@@ -8526,49 +8583,49 @@ D3D11CreateDeviceAndSwapChain_Detour (IDXGIAdapter          *pAdapter,
       // This all should be handled by a hook on CreateSwapChain or CreateSwapChainForHwnd
       // 
 
-      //const bool dummy_window =      swap_chain_desc.OutputWindow == 0 ||
-      //  SK_Win32_IsDummyWindowClass (swap_chain_desc.OutputWindow);
-      //
-      //if (! dummy_window)
-      //{
-      //  auto& windows =
-      //    rb.windows;
-      //
-      //  if ( ReadULongAcquire (&rb.thread) == 0x00 ||
-      //       ReadULongAcquire (&rb.thread) == SK_Thread_GetCurrentId () )
-      //  {
-      //    if (               windows.device != nullptr    &&
-      //         swap_chain_desc.OutputWindow != nullptr    &&
-      //         swap_chain_desc.OutputWindow != windows.device )
-      //      SK_LOG0 ( (L"Game created a new window?!"), __SK_SUBSYSTEM__ );
-      //  }
-      //
-      //  else
-      //  {
-      //    wchar_t                         wszClass [128] = { };
-      //    RealGetWindowClassW (
-      //      swap_chain_desc.OutputWindow, wszClass, 127 );
-      //
-      //    SK_LOG0 ( ( L"Installing Window Hooks for Window Class: '%ws'", wszClass ),
-      //                __SK_SUBSYSTEM__ );
-      //
-      //    static HWND hWndLast =
-      //      swap_chain_desc.OutputWindow;
-      //
-      //    if ((! IsWindow (windows.getDevice ())) || hWndLast != swap_chain_desc.OutputWindow)
-      //    {
-      //      hWndLast            = swap_chain_desc.OutputWindow;
-      //      windows.setDevice    (swap_chain_desc.OutputWindow);
-      //      SK_InstallWindowHook (swap_chain_desc.OutputWindow);
-      //    }
-      //
-      //    else
-      //    {
-      //      SK_LOG0 ( ( L"Ignored because a window hook already exists..."),
-      //                  __SK_SUBSYSTEM__ );
-      //    }
-      //  }
-      //}
+      const bool dummy_window =      swap_chain_desc.OutputWindow == 0 ||
+        SK_Win32_IsDummyWindowClass (swap_chain_desc.OutputWindow);
+      
+      if (! dummy_window)
+      {
+        auto& windows =
+          rb.windows;
+      
+        if ( ReadULongAcquire (&rb.thread) == 0x00 ||
+             ReadULongAcquire (&rb.thread) == SK_Thread_GetCurrentId () )
+        {
+          if (               windows.device != nullptr    &&
+               swap_chain_desc.OutputWindow != nullptr    &&
+               swap_chain_desc.OutputWindow != windows.device )
+            SK_LOG0 ( (L"Game created a new window?!"), __SK_SUBSYSTEM__ );
+        }
+      
+        else
+        {
+          wchar_t                         wszClass [128] = { };
+          RealGetWindowClassW (
+            swap_chain_desc.OutputWindow, wszClass, 127 );
+      
+          SK_LOG0 ( ( L"Installing Window Hooks for Window Class: '%ws'", wszClass ),
+                      __SK_SUBSYSTEM__ );
+      
+          static HWND hWndLast =
+            swap_chain_desc.OutputWindow;
+      
+          if ((! IsWindow (windows.getDevice ())) || hWndLast != swap_chain_desc.OutputWindow)
+          {
+            hWndLast            = swap_chain_desc.OutputWindow;
+            windows.setDevice    (swap_chain_desc.OutputWindow);
+            SK_InstallWindowHook (swap_chain_desc.OutputWindow);
+          }
+      
+          else
+          {
+            SK_LOG0 ( ( L"Ignored because a window hook already exists..."),
+                        __SK_SUBSYSTEM__ );
+          }
+        }
+      }
     }
 
 #ifdef SK_D3D11_WRAP_IMMEDIATE_CTX

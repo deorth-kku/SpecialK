@@ -33,6 +33,7 @@
 #include <filesystem>
 #include <intsafe.h>
 
+#include <SpecialK/diagnostics/cpu.h>
 #include <SpecialK/render/backend.h>
 #include <SpecialK/window.h>
 #include <SpecialK/core.h>
@@ -187,9 +188,12 @@ struct sk_config_t
                                 cpuid [1], cpuid [2]);
 #endif
 
-
     // MWAITX = ECX Bit 29 (8000_0001h)
     SK_CPU_HasMWAITX = (cpuid [2] & (1 << 28)) != 0;
+
+    if (! SK_CPU_HasMWAITX)
+          SK_CPU_HasMWAITX =
+      SK_CPU_TestForMWAITX ();
 
     SK_PerfTicksPerMs = SK_PerfFreq / 1000LL;
 
@@ -820,6 +824,7 @@ struct sk_config_t
       bool    force_file_buffering = false;
       int     submit_threads       = -1;
       int     cpu_decomp_threads   = -1;
+      bool    enable_hooks         = true;
     } dstorage;
 
     struct {
@@ -1045,6 +1050,7 @@ struct sk_config_t
       bool    capture_gamepad     = false;
       bool    use_hw_cursor       =  true;
       bool    use_raw_input       =  true;
+      int     game_set_hw_cursor  =     0; // Not stored in INI, the number of times
     } ui;
 
     struct gamepad_s {
@@ -1128,6 +1134,8 @@ struct sk_config_t
         int   max_allowed_buffers =     3;
         bool  calc_latency        = false;
       } hid;
+
+      bool    blocks_screensaver  =  true;
     } gamepad;
 
     struct keyboard_s {
@@ -1196,7 +1204,7 @@ struct sk_config_t
                      x.percent  > -0.00001F && x.percent   < 0.00001F &&
                      y.percent  > -0.00001F && y.percent   < 0.00001F; }
     } offset;
-    int     always_on_top       = SmartAlwaysOnTop;//NoPreferenceOnTop;
+    int     always_on_top       = NoPreferenceOnTop;//SmartAlwaysOnTop;
     bool    background_render   = false;
     bool    background_mute     = false;
     bool    confine_cursor      = false;
@@ -1206,7 +1214,8 @@ struct sk_config_t
     bool    fullscreen          = false;
     bool    multi_monitor_mode  = false;
     bool    disable_screensaver = false;
-    bool    fullscreen_no_saver =  true; // In Fullscreen, disable screensaver?
+    bool    fullscreen_no_saver = false; // In Fullscreen, disable screensaver?
+    bool    manage_screensaver  = false;
     bool    treat_fg_as_active  = false; // Compat. hack for NiNoKuni 2
     bool    dont_hook_wndproc   = false;
     bool    activate_at_start   = false;
@@ -1245,6 +1254,17 @@ struct sk_config_t
     bool     fsr3_mode                = false;
     bool     allow_fake_streamline    =  true;
     int      sdl_sanity_level         =     1;
+    struct sdl_s {
+      int    allow_wgi                =    -1;
+      int    allow_raw_input          =    -1;
+      int    allow_direct_input       =    -1;
+      int    allow_xinput             =    -1;
+      int    allow_hid                =    -1;
+      int    allow_all_ps_bt_features =    -1;
+      float  switch_led_brightness    = -1.0f;
+      int    use_joystick_thread      =    -1;
+      int    poll_sentinel            =    -1;
+    } sdl;
   } compatibility;
 
   struct apis_s {
@@ -1692,6 +1712,9 @@ enum class SK_GAME_ID
   SonicGenerations,             // SONIC_GENERATIONS.exe
   BrokenSword,                  // BS1R.exe
   YsX,                          // YsX.exe
+  Transistor,                   // Transistor.exe
+  MonsterHunterWilds,           // MonsterHunterWilds{Beta}.exe
+  DragonAgeTheVeilguard,        // Dragon Age The Veilguard.exe
 
   UNKNOWN_GAME               = 0xffff
 };

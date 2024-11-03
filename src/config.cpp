@@ -263,7 +263,10 @@ SK_GetCurrentGameID (void)
           { L"SONIC_X_SHADOW_GENERATIONS.exe",         SK_GAME_ID::SonicXShadowGenerations      },
           { L"SONIC_GENERATIONS.exe",                  SK_GAME_ID::SonicGenerations             },
           { L"BS1R.exe",                               SK_GAME_ID::BrokenSword                  },
-          { L"ysx.exe",                                SK_GAME_ID::YsX                          }
+          { L"ysx.exe",                                SK_GAME_ID::YsX                          },
+          { L"MonsterHunterWilds.exe",                 SK_GAME_ID::MonsterHunterWilds           },
+          { L"MonsterHunterWildsBeta.exe",             SK_GAME_ID::MonsterHunterWilds           },
+          { L"Dragon Age The Veilguard.exe",           SK_GAME_ID::DragonAgeTheVeilguard        }
         };
 
     first_check  = false;
@@ -927,6 +930,7 @@ struct {
     sk::ParameterBool*    force_file_buffering    = nullptr;
     sk::ParameterInt*     submit_threads          = nullptr;
     sk::ParameterInt*     cpu_decomp_threads      = nullptr;
+    sk::ParameterBool*    hook_dstorage           = nullptr;
   } dstorage;
 
   struct {
@@ -1102,6 +1106,7 @@ struct {
     sk::ParameterInt*     disabled_to_game        = nullptr;
     sk::ParameterBool*    bt_input_only           = nullptr;
     sk::ParameterFloat*   low_battery_warning     = nullptr;
+    sk::ParameterBool*    blocks_screensaver      = nullptr;
   } gamepad;
 } input;
 
@@ -1133,6 +1138,7 @@ struct {
   sk::ParameterStringW*   preferred_monitor_exact = nullptr;
   sk::ParameterBool*      disable_screensaver     = nullptr;
   sk::ParameterBool*      fullscreen_no_saver     = nullptr;
+  sk::ParameterBool*      manage_screensaver      = nullptr;
   sk::ParameterBool*      dont_hook_wndproc       = nullptr;
   sk::ParameterBool*      activate_at_start       = nullptr;
   sk::ParameterBool*      treat_fg_as_active      = nullptr;
@@ -1167,6 +1173,17 @@ struct {
   sk::ParameterBool*      fsr3_mode               = nullptr;
   sk::ParameterBool*      allow_fake_streamline   = nullptr;
   sk::ParameterInt*       sdl_sanity_level        = nullptr;
+  struct {
+    sk::ParameterInt*     allow_wgi               = nullptr;
+    sk::ParameterInt*     allow_raw_input         = nullptr;
+    sk::ParameterInt*     allow_direct_input      = nullptr;
+    sk::ParameterInt*     allow_xinput            = nullptr;
+    sk::ParameterInt*     allow_hid               = nullptr;
+    sk::ParameterInt*     allow_all_ps_bt_features= nullptr;
+    sk::ParameterFloat*   switch_led_brightness   = nullptr;
+    sk::ParameterInt*     use_joystick_thread     = nullptr;
+    sk::ParameterInt*     poll_sentinel           = nullptr;
+  } sdl;
 } compatibility;
 
 struct {
@@ -1662,6 +1679,7 @@ auto DeclKeybind =
     ConfigEntry (input.gamepad.hook_dinput7,             L"Install hooks for DirectInput 7",                           dll_ini,         L"Input.Gamepad",         L"EnableDirectInput7"),
     ConfigEntry (input.gamepad.hook_hid,                 L"Install hooks for HID",                                     dll_ini,         L"Input.Gamepad",         L"EnableHID"),
     ConfigEntry (input.gamepad.disable_rumble,           L"Disable Rumble from ALL SOURCES (across all APIs)",         dll_ini,         L"Input.Gamepad",         L"DisableRumble"),
+    ConfigEntry (input.gamepad.blocks_screensaver,       L"Gamepad activity will block screensaver activation",        dll_ini,         L"Input.Gamepad",         L"BlocksScreenSaver"),
     ConfigEntry (input.gamepad.bt_input_only,            L"Prevent Bluetooth Output (PlayStation DirectInput compat.)",dll_ini,         L"Input.Gamepad",         L"BluetoothInputOnly"),
     ConfigEntry (input.gamepad.hid.max_allowed_buffers,  L"Maximum allowed HID buffers; 32=NS default, 8=SK default,"
                                                          L" this will lower latency at the expense of possibly missed"
@@ -1738,6 +1756,7 @@ auto DeclKeybind =
     ConfigEntry (window.always_on_top,                   L"Prevent (0) or Force (1) a game's window Always-On-Top",    dll_ini,         L"Window.System",         L"AlwaysOnTop"),
     ConfigEntry (window.disable_screensaver,             L"Prevent the Windows Screensaver from activating",           dll_ini,         L"Window.System",         L"DisableScreensaver"),
     ConfigEntry (window.fullscreen_no_saver,             L"Prevent the Windows Screensaver in (Borderless) Fullscreen",dll_ini,         L"Window.System",         L"DisableFullscreenSaver"),
+    ConfigEntry (window.manage_screensaver,              L"Allow Screensaver to work, by Disabling any Game Overrides",dll_ini,         L"Window.System",         L"FullyManageScreenSaver"),
     ConfigEntry (window.preferred_monitor_id,            L"GDI Monitor ID of Preferred Monitor",                       dll_ini,         L"Window.System",         L"PreferredMonitor"),
     ConfigEntry (window.preferred_monitor_exact,         L"CCD Display Path (invariant) of Preferred Monitor",         dll_ini,         L"Window.System",         L"PreferredMonitorExact"),
     ConfigEntry (window.dont_hook_wndproc,               L"Disable WndProc / ClassProc hooks (wrap instead of hook)",  dll_ini,         L"Window.System",         L"DontHookWndProc"),
@@ -1761,6 +1780,17 @@ auto DeclKeybind =
     ConfigEntry (compatibility.fsr3_mode,                L"Avoid hooks on CreateSwapChainForHwnd",                     dll_ini,         L"Compatibility.General", L"FSR3Mode"),
     ConfigEntry (compatibility.allow_fake_streamline,    L"Allow invalid stuff, that might let fake DLSS3 mods work.", dll_ini,         L"Compatibility.General", L"AllowFakeStreamline"),
     ConfigEntry (compatibility.sdl_sanity_level,         L"Set Default (1) or Override (2) SDL input/window behavior.",dll_ini,         L"Compatibility.General", L"SDLSanityLevel"),
+    // Refer to SDL_hints.h, only the most useful options are exposed here...
+    ConfigEntry (compatibility.sdl.allow_wgi,            L"SDL_JOYSTICK_WGI",                                          dll_ini,         L"Compatibility.SDL",     L"SDL_JOYSTICK_WGI"),
+    ConfigEntry (compatibility.sdl.allow_raw_input,      L"SDL_JOYSTICK_RAWINPUT",                                     dll_ini,         L"Compatibility.SDL",     L"SDL_JOYSTICK_RAWINPUT"),
+    ConfigEntry (compatibility.sdl.allow_direct_input,   L"SDL_DIRECTINPUT_ENABLED",                                   dll_ini,         L"Compatibility.SDL",     L"SDL_DIRECTINPUT_ENABLED"),
+    ConfigEntry (compatibility.sdl.allow_xinput,         L"SDL_XINPUT_ENABLED",                                        dll_ini,         L"Compatibility.SDL",     L"SDL_XINPUT_ENABLED"),
+    ConfigEntry (compatibility.sdl.allow_hid,            L"SDL_JOYSTICK_HIDAPI",                                       dll_ini,         L"Compatibility.SDL",     L"SDL_JOYSTICK_HIDAPI"),
+    ConfigEntry (compatibility.sdl.
+                                allow_all_ps_bt_features,L"SDL_JOYSTICK_HIDAPI_PS4_RUMBLE",                            dll_ini,         L"Compatibility.SDL",     L"FullPlayStationBluetoothSupport"),
+    ConfigEntry (compatibility.sdl.switch_led_brightness,L"SDL_JOYSTICK_HIDAPI_JOYCON_HOME_LED",                       dll_ini,         L"Compatibility.SDL",     L"SDL_JOYSTICK_HIDAPI_JOYCON_HOME_LED"),
+    ConfigEntry (compatibility.sdl.use_joystick_thread,  L"SDL_JOYSTICK_THREAD",                                       dll_ini,         L"Compatibility.SDL",     L"SDL_JOYSTICK_THREAD"),
+    ConfigEntry (compatibility.sdl.poll_sentinel,        L"SDL_POLL_SENTINEL",                                         dll_ini,         L"Compatibility.SDL",     L"SDL_POLL_SENTINEL"),
 
     ConfigEntry (apis.last_known,                        L"Last Known Render API",                                     dll_ini,         L"API.Hook",              L"LastKnown"),
 
@@ -1971,6 +2001,7 @@ auto DeclKeybind =
     ConfigEntry (render.dstorage.force_file_buffering,   L"Force DirectStorage File Buffering",                        dll_ini,         L"Render.DStorage",       L"ForceFileBuffering"),
     ConfigEntry (render.dstorage.submit_threads,         L"Override default number of DirectStorage Submit threads",   dll_ini,         L"Render.DStorage",       L"NumberOfSubmitThreads"),
     ConfigEntry (render.dstorage.cpu_decomp_threads,     L"Override default number of CPU Decompression threads",      dll_ini,         L"Render.DStorage",       L"NumberOfCPUDecompThreads"),
+    ConfigEntry (render.dstorage.hook_dstorage,          L"Hook DirectStorage for additional features",                dll_ini,         L"Render.DStorage",       L"EnableHooks"),
 
     ConfigEntry (texture.d3d9.clamp_lod_bias,            L"Clamp Negative LOD Bias",                                   dll_ini,         L"Textures.D3D9",         L"ClampNegativeLODBias"),
     ConfigEntry (texture.d3d11.cache,                    L"Cache Textures",                                            dll_ini,         L"Textures.D3D11",        L"Cache"),
@@ -2432,8 +2463,6 @@ auto DeclKeybind =
         config.apis.OpenGL.hook                = false;
 
         config.input.ui.capture_hidden         = false; // Mouselook is a bitch
-        SK_ImGui_Cursor.prefs.no_warp.ui_open  = false;
-        SK_ImGui_Cursor.prefs.no_warp.visible  = false;
 
         config.textures.d3d11.cache            = true;
         config.textures.cache.ignore_nonmipped = true;
@@ -3271,8 +3300,6 @@ auto DeclKeybind =
       {
         config.window.treat_fg_as_active        = true;
         config.input.ui.use_hw_cursor           = false;
-        SK_ImGui_Cursor.prefs.no_warp.ui_open   = false;
-        SK_ImGui_Cursor.prefs.no_warp.visible   = false;
         config.textures.d3d11.uncompressed_mips = true;
         config.textures.d3d11.cache_gen_mips    = true;
         config.render.dxgi.deferred_isolation   = true; // For texture mods / HUD tracking
@@ -3431,7 +3458,6 @@ auto DeclKeybind =
         config.input.ui.use_hw_cursor                = false;
         config.input.ui.capture_hidden               = false;
         config.input.ui.capture_mouse                = false;
-        SK_ImGui_Cursor.prefs.no_warp.ui_open        =  true;
         config.render.framerate.sleepless_window     =  true;
         config.render.framerate.sleepless_render     = false; // Reshade Problems
         config.render.framerate.max_delta_time       =     1;
@@ -3688,26 +3714,37 @@ auto DeclKeybind =
         config.input.cursor.timeout              =   500;
         break;
 
+      case SK_GAME_ID::YsX:
+        // Reduce stutter on plugging and unplugging devices
+        config.compatibility.sdl.allow_direct_input = 0;
+        config.compatibility.sdl.allow_wgi          = 0;
+        config.compatibility.sdl.allow_raw_input    = 0;
+        config.textures.d3d11.cache                 = false;
+        // Cache is pointless, the game has an equivalent feature
+        break;
+
       case SK_GAME_ID::BrokenSword:
         // Has really bad timing code that will cause major frame drops w/o.
-        config.render.framerate.max_delta_time   = 15;
+        config.render.framerate.max_delta_time      = 15;
+        break;
+
+      case SK_GAME_ID::MonsterHunterWilds:
+        config.steam.crapcom_mode                   = true;
+        config.render.dstorage.enable_hooks         = false;
+        break;
+
+      case SK_GAME_ID::DragonAgeTheVeilguard:
+        config.input.ui.capture_mouse               = true;
         break;
 
       case SK_GAME_ID::Metaphor:
         config.compatibility.init_on_separate_thread   = false;
+        config.window.fullscreen_no_saver              = true;
+        config.input.ui.capture_hidden                 = true;
         config.input.keyboard.override_alt_f4          = true; // Oh lord, kill that buggy exit confirmation
-        config.render.dxgi.fake_fullscreen_mode        = true;
-        config.window.always_on_top                    = SmartAlwaysOnTop;
-        config.window.borderless                       = true;
-        config.window.fullscreen                       = true;
-        config.display.force_windowed                  = true;
         config.render.framerate.sleepless_render       = false;
         config.render.framerate.sleepless_window       = false;
         config.input.gamepad.xinput.emulate            = true; // XInput-only
-        config.input.gamepad.xinput.disable [1]        = true;
-        config.input.gamepad.xinput.disable [2]        = true;
-        config.input.gamepad.xinput.disable [3]        = true;
-        config.priority.perf_cores_only                = true;
         config.render.hdr.remaster_8bpc_as_unorm       = true;
         config.render.hdr.remaster_subnative_as_unorm  = true;
         config.input.gamepad.dinput.block_enum_devices = true; // Avoid perf issues
@@ -3797,8 +3834,6 @@ auto DeclKeybind =
         config.input.cursor.manage                    = true;
         config.input.cursor.gamepad_deactivates       = true;
         config.input.cursor.timeout                   =    0;
-        SK_ImGui_Cursor.prefs.no_warp.visible         = true;
-        SK_ImGui_Cursor.prefs.no_warp.ui_open         = true;
         config.window.disable_screensaver             = true;
         config.render.hdr.remaster_8bpc_as_unorm      = true;
         config.render.hdr.remaster_subnative_as_unorm = true;
@@ -3903,6 +3938,14 @@ auto DeclKeybind =
         // Requires synchronous init or the game will get GDI Copy
         config.compatibility.init_on_separate_thread = false;
       } break;
+
+      case SK_GAME_ID::Transistor:
+      {
+        config.apis.Vulkan.translate = 1; // Bridge it
+        config.apis.OpenGL.hook      = false;
+        config.apis.dxgi.d3d11.hook  = true;
+        config.apis.dxgi.d3d12.hook  = true;
+      } break;
     }
   }
 
@@ -3970,6 +4013,19 @@ auto DeclKeybind =
   compatibility.rehook_loadlibrary->load    (config.compatibility.rehook_loadlibrary);
   compatibility.using_wine->load            (config.compatibility.using_wine);
   compatibility.allow_dxdiagn->load         (config.compatibility.allow_dxdiagn);
+                                             
+  compatibility.sdl.allow_wgi->load         (config.compatibility.sdl.allow_wgi);
+  compatibility.sdl.allow_raw_input->load   (config.compatibility.sdl.allow_raw_input); 
+  compatibility.sdl.allow_direct_input->load(config.compatibility.sdl.allow_direct_input);
+  compatibility.sdl.allow_xinput->load      (config.compatibility.sdl.allow_xinput);
+  compatibility.sdl.allow_hid->load         (config.compatibility.sdl.allow_hid);
+  compatibility.sdl.allow_all_ps_bt_features 
+                                     ->load (config.compatibility.sdl.allow_all_ps_bt_features);
+  compatibility.sdl.switch_led_brightness    
+                                     ->load (config.compatibility.sdl.switch_led_brightness);
+  compatibility.sdl.use_joystick_thread
+                                     ->load (config.compatibility.sdl.use_joystick_thread);
+  compatibility.sdl.poll_sentinel->load     (config.compatibility.sdl.poll_sentinel);
 
 #ifdef _M_IX86
   compatibility.auto_large_address->load (config.compatibility.auto_large_address_patch);
@@ -4545,6 +4601,7 @@ auto DeclKeybind =
   render.dstorage.submit_threads->  load (config.render.dstorage.submit_threads);
   render.dstorage.cpu_decomp_threads->
                                     load (config.render.dstorage.cpu_decomp_threads);
+  render.dstorage.hook_dstorage->   load (config.render.dstorage.enable_hooks);
 
   texture.d3d11.cache->load              (config.textures.d3d11.cache);
   texture.d3d11.use_l3_hash->load        (config.textures.d3d11.use_l3_hash);
@@ -4589,8 +4646,6 @@ auto DeclKeybind =
 
   input.cursor.ui_capture->load          (config.input.ui.capture);
   input.cursor.hw_cursor->load           (config.input.ui.use_hw_cursor);
-  input.cursor.no_warp_ui->load          (SK_ImGui_Cursor.prefs.no_warp.ui_open);
-  input.cursor.no_warp_visible->load     (SK_ImGui_Cursor.prefs.no_warp.visible);
   input.cursor.block_invisible->load     (config.input.ui.capture_hidden);
   input.cursor.fix_synaptics->load       (config.input.mouse.fix_synaptics);
   input.cursor.antiwarp_deadzone->load   (config.input.mouse.antiwarp_deadzone);
@@ -4633,6 +4688,7 @@ auto DeclKeybind =
   input.gamepad.hid.max_allowed_buffers->load  (config.input.gamepad.hid.max_allowed_buffers);
   input.gamepad.bt_input_only->load            (config.input.gamepad.bt_input_only);
   input.gamepad.disable_rumble->load           (config.input.gamepad.disable_rumble);
+  input.gamepad.blocks_screensaver->load       (config.input.gamepad.blocks_screensaver);
   input.gamepad.xinput.hook_setstate->load     (config.input.gamepad.xinput.hook_setstate);
   input.gamepad.xinput.auto_slot_assign->load  (config.input.gamepad.xinput.auto_slot_assign);
   input.gamepad.xinput.blackout_api->load      (config.input.gamepad.xinput.blackout_api);
@@ -4795,6 +4851,7 @@ auto DeclKeybind =
   window.always_on_top->load       (config.window.always_on_top);
   window.disable_screensaver->load (config.window.disable_screensaver);
   window.fullscreen_no_saver->load (config.window.fullscreen_no_saver);
+  window.manage_screensaver->load  (config.window.manage_screensaver);
   window.dont_hook_wndproc->load   (config.window.dont_hook_wndproc);
   window.activate_at_start->load   (config.window.activate_at_start);
   window.treat_fg_as_active->load  (config.window.treat_fg_as_active);
@@ -5923,6 +5980,18 @@ SK_SaveConfig ( std::wstring name,
   compatibility.allow_fake_streamline->store  (config.compatibility.allow_fake_streamline);
   compatibility.sdl_sanity_level->store       (config.compatibility.sdl_sanity_level);
 
+  compatibility.sdl.allow_xinput->store       (config.compatibility.sdl.allow_xinput);
+  compatibility.sdl.allow_direct_input->store (config.compatibility.sdl.allow_direct_input);
+  compatibility.sdl.allow_wgi->store          (config.compatibility.sdl.allow_wgi);
+  compatibility.sdl.allow_raw_input->store    (config.compatibility.sdl.allow_raw_input); 
+  compatibility.sdl.allow_hid->store          (config.compatibility.sdl.allow_hid);
+  compatibility.sdl.switch_led_brightness    
+                                       ->store(config.compatibility.sdl.switch_led_brightness);
+  compatibility.sdl.use_joystick_thread->store(config.compatibility.sdl.use_joystick_thread);
+  compatibility.sdl.poll_sentinel->store      (config.compatibility.sdl.poll_sentinel);
+  compatibility.sdl.allow_all_ps_bt_features 
+                                       ->store(config.compatibility.sdl.allow_all_ps_bt_features);
+
 #ifdef _M_IX86
   compatibility.auto_large_address->store     (config.compatibility.auto_large_address_patch);
 #endif
@@ -6035,8 +6104,6 @@ SK_SaveConfig ( std::wstring name,
   input.cursor.ui_capture->store              (config.input.ui.capture);
   input.cursor.hw_cursor->store               (config.input.ui.use_hw_cursor);
   input.cursor.block_invisible->store         (config.input.ui.capture_hidden);
-  input.cursor.no_warp_ui->store              (SK_ImGui_Cursor.prefs.no_warp.ui_open);
-  input.cursor.no_warp_visible->store         (SK_ImGui_Cursor.prefs.no_warp.visible);
   input.cursor.fix_synaptics->store           (config.input.mouse.fix_synaptics);
   input.cursor.antiwarp_deadzone->store       (config.input.mouse.antiwarp_deadzone);
 
@@ -6113,6 +6180,7 @@ SK_SaveConfig ( std::wstring name,
   input.gamepad.hid.max_allowed_buffers->store     (config.input.gamepad.hid.max_allowed_buffers);
   input.gamepad.bt_input_only->store               (config.input.gamepad.bt_input_only);
   input.gamepad.disable_rumble->store              (config.input.gamepad.disable_rumble);
+  input.gamepad.blocks_screensaver->store          (config.input.gamepad.blocks_screensaver);
   input.gamepad.xinput.hook_setstate->store        (config.input.gamepad.xinput.hook_setstate);
   input.gamepad.xinput.auto_slot_assign->store     (config.input.gamepad.xinput.auto_slot_assign);
   input.gamepad.xinput.blackout_api->store         (config.input.gamepad.xinput.blackout_api);
@@ -6197,6 +6265,7 @@ SK_SaveConfig ( std::wstring name,
   window.always_on_top->store                 (config.window.always_on_top);
   window.disable_screensaver->store           (config.window.disable_screensaver);
   window.fullscreen_no_saver->store           (config.window.fullscreen_no_saver);
+  window.manage_screensaver->store            (config.window.manage_screensaver);
   window.dont_hook_wndproc->store             (config.window.dont_hook_wndproc);
   window.activate_at_start->store             (config.window.activate_at_start);
   window.treat_fg_as_active->store            (config.window.treat_fg_as_active);
@@ -6540,6 +6609,7 @@ SK_SaveConfig ( std::wstring name,
       render.dstorage.submit_threads->  store (config.render.dstorage.submit_threads);
       render.dstorage.cpu_decomp_threads->
                                         store (config.render.dstorage.cpu_decomp_threads);
+      render.dstorage.hook_dstorage->   store (config.render.dstorage.enable_hooks);
     }
 
     if ( SK_IsInjected () || ( SK_GetDLLRole () & DLL_ROLE::D3D9    ) ||

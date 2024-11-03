@@ -850,6 +850,8 @@ bool
     EqualRect (&rectGame, &rectIntersect);
 };
 
+BOOL WINAPI SK_ShowWindow (HWND hWnd, int nCmdShow);
+
 bool SK_Window_HasBorder      (HWND hWnd = game_window.hWnd);
 void SK_Window_RemoveBorders  (void);
 void SK_Window_RestoreBorders (DWORD dwStyle, DWORD dwStyleEx);
@@ -867,6 +869,7 @@ BOOL        SK_Window_IsTopMostOnMonitor        ( HWND hWndToTest );
 bool        SK_Window_OnFocusChange             ( HWND hWndNewTarget,
                                                   HWND hWndOld );
 bool        SK_Window_DeactivateCursor          (bool ignore_imgui = false);
+bool        SK_Window_ActivateCursor            (bool changed = false);
 BOOL WINAPI SK_GetGUIThreadInfo                 (DWORD, PGUITHREADINFO);
 
 bool SK_IsRectTooSmall        (RECT* lpRect0, RECT* lpRect1);
