@@ -597,6 +597,8 @@ struct {
   sk::ParameterBool*      disable_alpha           = nullptr;
   sk::ParameterBool*      antialias_lines         = nullptr;
   sk::ParameterBool*      antialias_contours      = nullptr;
+  sk::ParameterBool*      center_cursor_on_overlay= nullptr;
+  sk::ParameterBool*      nav_moves_mouse         = nullptr;
 } imgui;
 
 struct {
@@ -1032,11 +1034,8 @@ struct {
     sk::ParameterFloat*   timeout                 = nullptr;
     sk::ParameterBool*    ui_capture              = nullptr;
     sk::ParameterBool*    hw_cursor               = nullptr;
-    sk::ParameterBool*    no_warp_ui              = nullptr;
-    sk::ParameterBool*    no_warp_visible         = nullptr;
     sk::ParameterBool*    block_invisible         = nullptr;
     sk::ParameterBool*    fix_synaptics           = nullptr;
-    sk::ParameterFloat*   antiwarp_deadzone       = nullptr;
   } cursor;
 
   struct {
@@ -1598,6 +1597,8 @@ auto DeclKeybind =
     ConfigEntry (imgui.show_gsync_status,                L"Show G-Sync Status on Control Panel",                       osd_ini,         L"ImGui.Global",          L"ShowGSyncStatus"),
     ConfigEntry (imgui.mac_style_menu,                   L"Use Mac-style Menu Bar",                                    osd_ini,         L"ImGui.Global",          L"UseMacStyleMenu"),
     ConfigEntry (imgui.show_input_apis,                  L"Show Input APIs currently in-use",                          osd_ini,         L"ImGui.Global",          L"ShowActiveInputAPIs"),
+    ConfigEntry (imgui.center_cursor_on_overlay,         L"Center the mouse cursor when opening SK's overlay",         osd_ini,         L"ImGui.Global",          L"CenterCursorOnOverlayToggle"),
+    ConfigEntry (imgui.nav_moves_mouse,                  L"Keyboard/Gamepad selection changes move the mouse cursor",  osd_ini,         L"ImGui.Global",          L"NavigationMovesMouseCursor"),
 
     ConfigEntry (screenshots.keep_png_copy,              L"Keep a .PNG compressed copy of each screenshot?",           osd_ini,         L"Screenshot.System",     L"KeepLosslessPNG"),
     ConfigEntry (screenshots.play_sound,                 L"Play a Sound when triggering Screenshot Capture",           osd_ini,         L"Screenshot.System",     L"PlaySoundOnCapture"),
@@ -1664,10 +1665,6 @@ auto DeclKeybind =
     ConfigEntry (input.cursor.hw_cursor,                 L"Use a Hardware Cursor for Special K's UI Features",         dll_ini,         L"Input.Cursor",          L"UseHardwareCursor"),
     ConfigEntry (input.cursor.block_invisible,           L"Block Mouse Input if Hardware Cursor is Invisible",         dll_ini,         L"Input.Cursor",          L"BlockInvisibleCursorInput"),
     ConfigEntry (input.cursor.fix_synaptics,             L"Fix Synaptic Touchpad Scroll",                              dll_ini,         L"Input.Cursor",          L"FixSynapticsTouchpadScroll"),
-    ConfigEntry (input.cursor.antiwarp_deadzone,         L"Percentage of Screen that the game may try to move the "
-                                                         L"cursor to for mouselook.",                                  dll_ini,         L"Input.Cursor",          L"AntiwarpDeadzonePercent"),
-    ConfigEntry (input.cursor.no_warp_ui,                L"Prevent Games from Warping Cursor while Config UI is Open", dll_ini,         L"Input.Cursor",          L"NoWarpUI"),
-    ConfigEntry (input.cursor.no_warp_visible,           L"Prevent Games from Warping Cursor while Cursor is Visible", dll_ini,         L"Input.Cursor",          L"NoWarpVisibleGameCursor"),
 
     ConfigEntry (input.gamepad.disabled_to_game,         L"Disable ALL Gamepad Input (across all APIs)",               dll_ini,         L"Input.Gamepad",         L"DisabledToGame"),
     ConfigEntry (input.gamepad.disable_hid,              L"Disable HID Input (prevent double-input if XInput is used)",dll_ini,         L"Input.Gamepad",         L"DisableHID"),
@@ -4049,6 +4046,8 @@ auto DeclKeybind =
   imgui.show_gsync_status->load          (config.apis.NvAPI.gsync_status);
   imgui.mac_style_menu->load             (config.imgui.use_mac_style_menu);
   imgui.show_input_apis->load            (config.imgui.show_input_apis);
+  imgui.center_cursor_on_overlay->load   (config.input.ui.center_cursor);
+  imgui.nav_moves_mouse->load            (config.input.ui.nav_moves_mouse);
 
   imgui.disable_alpha->load              (config.imgui.render.disable_alpha);
   imgui.antialias_lines->load            (config.imgui.render.antialias_lines);
@@ -4648,7 +4647,6 @@ auto DeclKeybind =
   input.cursor.hw_cursor->load           (config.input.ui.use_hw_cursor);
   input.cursor.block_invisible->load     (config.input.ui.capture_hidden);
   input.cursor.fix_synaptics->load       (config.input.mouse.fix_synaptics);
-  input.cursor.antiwarp_deadzone->load   (config.input.mouse.antiwarp_deadzone);
 
   input.gamepad.disabled_to_game->load   (config.input.gamepad.disabled_to_game);
   input.gamepad.disable_hid->load        (config.input.gamepad.disable_hid);
@@ -5539,7 +5537,7 @@ auto DeclKeybind =
   //
   // EMERGENCY OVERRIDES
   //
-  config.input.ui.use_raw_input = false;
+  // ...
 
 
   //
@@ -6057,6 +6055,8 @@ SK_SaveConfig ( std::wstring name,
   imgui.disable_alpha->store                  (config.imgui.render.disable_alpha);
   imgui.antialias_lines->store                (config.imgui.render.antialias_lines);
   imgui.antialias_contours->store             (config.imgui.render.antialias_contours);
+  imgui.center_cursor_on_overlay->store       (config.input.ui.center_cursor);
+  imgui.nav_moves_mouse->store                (config.input.ui.nav_moves_mouse);
 
   apis.last_known->store                      (static_cast <int> (config.apis.last_known));
 
@@ -6105,7 +6105,6 @@ SK_SaveConfig ( std::wstring name,
   input.cursor.hw_cursor->store               (config.input.ui.use_hw_cursor);
   input.cursor.block_invisible->store         (config.input.ui.capture_hidden);
   input.cursor.fix_synaptics->store           (config.input.mouse.fix_synaptics);
-  input.cursor.antiwarp_deadzone->store       (config.input.mouse.antiwarp_deadzone);
 
   input.gamepad.disabled_to_game->store       (config.input.gamepad.disabled_to_game);
   input.gamepad.disable_hid->store            (config.input.gamepad.disable_hid);

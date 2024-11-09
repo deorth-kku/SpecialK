@@ -25,7 +25,7 @@
 #ifdef  __SK_SUBSYSTEM__
 #undef  __SK_SUBSYSTEM__
 #endif
-#define __SK_SUBSYSTEM__ L"Input Mgr."
+#define __SK_SUBSYSTEM__ L"Input Hook"
 
 
 SetWindowsHookEx_pfn    SetWindowsHookExA_Original   = nullptr;
@@ -177,15 +177,14 @@ SK_Proxy_MouseProc   (
       DWORD dwTid =
         GetCurrentThreadId ();
 
-      using MouseProc =
-        LRESULT (CALLBACK *)(int,WPARAM,LPARAM);
-
-      return
-        ((MouseProc)__hooks._RealMouseProcs.count (dwTid) &&
-                    __hooks._RealMouseProcs.at    (dwTid) != nullptr ?
-                    __hooks._RealMouseProcs.at    (dwTid)            :
-                    __hooks._RealMouseProc)( nCode, wParam,
-                                                    lParam );
+      auto hook_fn = __hooks._RealMouseProcs [dwTid];
+           hook_fn =
+           hook_fn != nullptr ?
+           hook_fn            :
+         __hooks._RealMouseProc;
+                    
+      if (hook_fn != nullptr)
+        return hook_fn (nCode, wParam, lParam);
     }
   }
 
@@ -277,15 +276,14 @@ SK_Proxy_LLMouseProc   (
       DWORD dwTid =
         GetCurrentThreadId ();
 
-      using MouseProc =
-        LRESULT (CALLBACK *)(int,WPARAM,LPARAM);
-
-      return
-        ((MouseProc)__hooks._RealMouseProcs.count (dwTid) &&
-                    __hooks._RealMouseProcs.at    (dwTid) != nullptr ?
-                    __hooks._RealMouseProcs.at    (dwTid)            :
-                    __hooks._RealMouseProc)( nCode, wParam,
-                                                    lParam );
+      auto hook_fn = __hooks._RealMouseProcs [dwTid];
+           hook_fn =
+           hook_fn != nullptr ?
+           hook_fn            :
+         __hooks._RealMouseProc;
+                    
+      if (hook_fn != nullptr)
+        return hook_fn (nCode, wParam, lParam);
     }
   }
 
@@ -303,77 +301,79 @@ SK_Proxy_KeyboardProc (
   _In_ WPARAM wParam,
   _In_ LPARAM lParam  )
 {
-  if (nCode == HC_ACTION || nCode == HC_NOREMOVE)
+  LPARAM lParamOrig = lParam;
+
+  if (nCode == HC_ACTION)
   {
-    using KeyboardProc =
-      LRESULT (CALLBACK *)(int,WPARAM,LPARAM);
+    bool wasPressed = (((DWORD)lParam) & (1UL << 30UL)) != 0UL,
+          isPressed = (((DWORD)lParam) & (1UL << 31UL)) == 0UL,
+          isAltDown = (((DWORD)lParam) & (1UL << 29UL)) != 0UL;
 
-    if (nCode == HC_ACTION)
+    SHORT vKey =
+      static_cast <SHORT> (wParam);
+
+    if ( config.input.keyboard.override_alt_f4 &&
+         config.input.keyboard.   catch_alt_f4 )
     {
-      using KeyboardProc =
-        LRESULT (CALLBACK *)(int,WPARAM,LPARAM);
-
-      bool wasPressed = (((DWORD)lParam) & (1UL << 30UL)) != 0UL,
-            isPressed = (((DWORD)lParam) & (1UL << 31UL)) == 0UL,
-            isAltDown = (((DWORD)lParam) & (1UL << 29UL)) != 0UL;
-
-      SHORT vKey =
-        static_cast <SHORT> (wParam);
-
-      if ( config.input.keyboard.override_alt_f4 &&
-              config.input.keyboard.catch_alt_f4 )
+      if (vKey == VK_F4 && isAltDown && isPressed && (! wasPressed) && SK_IsGameWindowFocused ())
       {
-        if (SK_IsGameWindowFocused () && vKey == VK_F4 && isAltDown && isPressed && (! wasPressed))
-        {
-          SK_ImGui_WantExit = true;
+        SK_ImGui_WantExit = true;
 
-          return 1;
-        }
+        return 1;
       }
-
-      if (SK_IsGameWindowActive () || (! isPressed))
-        ImGui::GetIO ().KeysDown [vKey] = isPressed;
     }
 
-    if (SK_ImGui_WantKeyboardCapture ())
+    if ((! isPressed) || SK_IsGameWindowActive ())
+      ImGui::GetIO ().KeysDown [vKey] = isPressed;
+
+    bool hide =
+      SK_ImGui_WantKeyboardCapture ();
+
+    if (hide)
+    {
+      SK_WinHook_Backend->markHidden (sk_input_dev_type::Keyboard);
+    }
+
+    // Game uses a keyboard hook for input that the Steam overlay cannot block
+    if (SK_Console::getInstance ()->isVisible () || SK_GetStoreOverlayState (true))
     {
       SK_WinHook_Backend->markHidden (sk_input_dev_type::Keyboard);
 
       return
-        CallNextHookEx (
-            nullptr, nCode,
-             wParam, lParam );
+        CallNextHookEx (0, nCode, wParam, lParam);
     }
 
-    else
+    DWORD dwTid =
+      GetCurrentThreadId ();
+
+    SK_WinHook_Backend->markRead (sk_input_dev_type::Keyboard);
+
+    auto hook_fn = __hooks._RealKeyboardProcs [dwTid];
+         hook_fn =
+         hook_fn != nullptr ?
+         hook_fn            :
+       __hooks._RealKeyboardProc;
+
+    // Fix common keys that may be stuck in combination with Alt, Windows Key, etc.
+    //   the game shouldn't have seen those keys, but the hook they are using doesn't
+    //     hide them...
+    if (hide)
     {
-      // Game uses a keyboard hook for input that the Steam overlay cannot block
-      if (SK_GetStoreOverlayState (true) || SK_Console::getInstance ()->isVisible ())
-      {
-        SK_WinHook_Backend->markHidden (sk_input_dev_type::Keyboard);
+      // Release these keys when alt-tabbing...
+      lParam = 0;
 
-        return
-          CallNextHookEx (0, nCode, wParam, lParam);
-      }
-
-      DWORD dwTid =
-        GetCurrentThreadId ();
-
-      SK_WinHook_Backend->markRead (sk_input_dev_type::Keyboard);
-
-      return
-        ((KeyboardProc)__hooks._RealKeyboardProcs.count (dwTid) &&
-                       __hooks._RealKeyboardProcs.at    (dwTid) != nullptr ?
-                       __hooks._RealKeyboardProcs.at    (dwTid)            :
-                       __hooks._RealKeyboardProc)( nCode, wParam,
-                                                          lParam );
+      if (hook_fn != nullptr && config.input.keyboard.disabled_to_game != 1)
+          hook_fn (nCode, wParam, lParam);
     }
+
+    if (     hook_fn != nullptr && !hide)
+      return hook_fn (nCode, wParam, lParam);
   }
 
   return
     CallNextHookEx (
         nullptr, nCode,
-         wParam, lParam );
+         wParam, lParamOrig );
 }
 
 LRESULT
@@ -383,11 +383,10 @@ SK_Proxy_LLKeyboardProc (
   _In_ WPARAM wParam,
   _In_ LPARAM lParam  )
 {
+  LPARAM lParamOrig = lParam;
+
   if (nCode == HC_ACTION)
   {
-    using KeyboardProc =
-      LRESULT (CALLBACK *)(int,WPARAM,LPARAM);
-
     KBDLLHOOKSTRUCT *pHookData =
       (KBDLLHOOKSTRUCT *)lParam;
 
@@ -401,9 +400,9 @@ SK_Proxy_LLKeyboardProc (
       static_cast <SHORT> (wParam);
 
     if ( config.input.keyboard.override_alt_f4 &&
-            config.input.keyboard.catch_alt_f4 )
+         config.input.keyboard.   catch_alt_f4 )
     {
-      if (SK_IsGameWindowFocused () && vKey == VK_F4 && isAltDown && isPressed && (! wasPressed))
+      if (vKey == VK_F4 && isAltDown && isPressed && (! wasPressed) && SK_IsGameWindowFocused ())
       {
         SK_ImGui_WantExit = true;
 
@@ -440,45 +439,54 @@ SK_Proxy_LLKeyboardProc (
     if (bWindowActive || (! isPressed))
       ImGui::GetIO ().KeysDown [vKey] = isPressed;
 
-    if (SK_ImGui_WantKeyboardCapture ())
+    bool hide =
+      SK_ImGui_WantKeyboardCapture ();
+
+    if (hide)
+    {
+      SK_WinHook_Backend->markHidden (sk_input_dev_type::Keyboard);
+    }
+
+    // Game uses a keyboard hook for input that the Steam overlay cannot block
+    if (SK_Console::getInstance ()->isVisible () || SK_GetStoreOverlayState (true))
     {
       SK_WinHook_Backend->markHidden (sk_input_dev_type::Keyboard);
 
       return
-        CallNextHookEx (
-            nullptr, nCode,
-             wParam, lParam );
+        CallNextHookEx (0, nCode, wParam, lParam);
     }
 
-    else
+    DWORD dwTid =
+      GetCurrentThreadId ();
+
+    SK_WinHook_Backend->markRead (sk_input_dev_type::Keyboard);
+
+    auto hook_fn = __hooks._RealKeyboardProcs [dwTid];
+         hook_fn =
+         hook_fn != nullptr ?
+         hook_fn            :
+       __hooks._RealKeyboardProc;
+
+    // Fix common keys that may be stuck in combination with Alt, Windows Key, etc.
+    //   the game shouldn't have seen those keys, but the hook they are using doesn't
+    //     hide them...
+    if (hide)
     {
-      // Game uses a keyboard hook for input that the Steam overlay cannot block
-      if (SK_GetStoreOverlayState (true) || SK_Console::getInstance ()->isVisible ())
-      {
-        SK_WinHook_Backend->markHidden (sk_input_dev_type::Keyboard);
+      // Release these keys when alt-tabbing...
+      lParam = 0;
 
-        return
-          CallNextHookEx (0, nCode, wParam, lParam);
-      }
-
-      DWORD dwTid =
-        GetCurrentThreadId ();
-
-      SK_WinHook_Backend->markRead (sk_input_dev_type::Keyboard);
-
-      return
-        ((KeyboardProc)__hooks._RealKeyboardProcs.count (dwTid) &&
-                       __hooks._RealKeyboardProcs.at    (dwTid) != nullptr ?
-                       __hooks._RealKeyboardProcs.at    (dwTid)            :
-                       __hooks._RealKeyboardProc)( nCode, wParam,
-                                                          lParam );
+      if (hook_fn != nullptr && config.input.keyboard.disabled_to_game != 1)
+          hook_fn (nCode, wParam, lParam);
     }
+
+    if (     hook_fn != nullptr && !hide)
+      return hook_fn (nCode, wParam, lParam);
   }
 
   return
     CallNextHookEx (
         nullptr, nCode,
-         wParam, lParam );
+         wParam, lParamOrig );
 }
 
 BOOL
@@ -527,17 +535,6 @@ UnhookWindowsHookEx_Detour ( _In_ HHOOK hhk )
       UnhookWindowsHookEx_Original (hhk);
   }
 
-  for ( auto& hook : __hooks._RealKeyboardHooks )
-  {
-    if (hook.second == hhk)
-    {
-      __hooks._RealKeyboardProcs [hook.first] = 0;
-
-      return
-        UnhookWindowsHookEx_Original (hhk);
-    }
-  }
-
   return
     UnhookWindowsHookEx_Original (hhk);
 }
@@ -552,6 +549,8 @@ SetWindowsHookExW_Detour (
 {
   wchar_t                   wszHookMod [MAX_PATH] = { };
   GetModuleFileNameW (hmod, wszHookMod, MAX_PATH);
+
+  HHOOK* hook = nullptr;
 
   switch (idHook)
   {
@@ -572,17 +571,26 @@ SetWindowsHookExW_Detour (
 
         if (dwThreadId != 0)
         {
-          if (! __hooks._RealKeyboardProcs.count (dwThreadId) ||
-                __hooks._RealKeyboardProcs       [dwThreadId] == nullptr)
-          {     __hooks._RealKeyboardProcs       [dwThreadId] = lpfn;
-                                                      install = true;
+          if (    !__hooks._RealKeyboardProcs.count (dwThreadId) ||
+                   __hooks._RealKeyboardProcs       [dwThreadId] == nullptr)
+          {        __hooks._RealKeyboardProcs       [dwThreadId] = lpfn;
+            hook =&__hooks._RealKeyboardHooks       [dwThreadId];
+                                                         install = true;
           }
+
+          else
+            SK_LOGi0 ( L" * A keyboard hook already exists for thread %d",
+                         dwThreadId );
         }
 
         else if (__hooks._RealKeyboardProc == nullptr)
         {        __hooks._RealKeyboardProc = lpfn;
+          hook =&__hooks._RealKeyboardHook;
                                    install = true;
         }
+
+        else
+          SK_LOGi0 (L" * A global keyboard hook already exists");
 
         if (install)
           lpfn = (idHook == WH_KEYBOARD ? SK_Proxy_KeyboardProc
@@ -607,17 +615,26 @@ SetWindowsHookExW_Detour (
 
         if (dwThreadId != 0)
         {
-          if (! __hooks._RealMouseProcs.count (dwThreadId) ||
-                __hooks._RealMouseProcs       [dwThreadId] == nullptr)
-          {     __hooks._RealMouseProcs       [dwThreadId] = lpfn;
-                                                   install = true;
+          if (    !__hooks._RealMouseProcs.count (dwThreadId) ||
+                   __hooks._RealMouseProcs       [dwThreadId] == nullptr)
+          {        __hooks._RealMouseProcs       [dwThreadId] = lpfn;
+            hook =&__hooks._RealMouseHooks       [dwThreadId];
+                                                      install = true;
           }
+
+          else
+            SK_LOGi0 ( L" * A global mouse hook already exists for thread %d",
+                         dwThreadId );
         }
 
         else if (__hooks._RealMouseProc == nullptr)
         {        __hooks._RealMouseProc = lpfn;
+          hook =&__hooks._RealMouseHook;
                                 install = true;
         }
+
+        else
+          SK_LOGi0 (L" * A global mouse hook already exists");
 
         if (install)
           lpfn = (idHook == WH_MOUSE ? SK_Proxy_MouseProc
@@ -626,11 +643,16 @@ SetWindowsHookExW_Detour (
     } break;
   }
 
-  return
+  auto ret =
     SetWindowsHookExW_Original (
       idHook, lpfn,
               hmod, dwThreadId
     );
+
+  if (hook != nullptr)
+    *hook = ret;
+
+  return ret;
 }
 
 HHOOK
@@ -643,6 +665,8 @@ SetWindowsHookExA_Detour (
 {
   wchar_t                   wszHookMod [MAX_PATH] = { };
   GetModuleFileNameW (hmod, wszHookMod, MAX_PATH);
+
+  HHOOK* hook = nullptr;
 
   switch (idHook)
   {
@@ -663,17 +687,26 @@ SetWindowsHookExA_Detour (
 
         if (dwThreadId != 0)
         {
-          if (! __hooks._RealKeyboardProcs.count (dwThreadId) || 
-                __hooks._RealKeyboardProcs       [dwThreadId] == nullptr)
-          {     __hooks._RealKeyboardProcs       [dwThreadId] = lpfn;
-                                                      install = true;
+          if (    !__hooks._RealKeyboardProcs.count (dwThreadId) ||
+                   __hooks._RealKeyboardProcs       [dwThreadId] == nullptr)
+          {        __hooks._RealKeyboardProcs       [dwThreadId] = lpfn;
+            hook =&__hooks._RealKeyboardHooks       [dwThreadId];
+                                                         install = true;
           }
+
+          else
+            SK_LOGi0 ( L" * A keyboard hook already exists for thread %d",
+                         dwThreadId );
         }
 
         else if (__hooks._RealKeyboardProc == nullptr)
         {        __hooks._RealKeyboardProc = lpfn;
+          hook =&__hooks._RealKeyboardHook;
                                    install = true;
         }
+
+        else
+          SK_LOGi0 (L" * A global keyboard hook already exists");
 
         if (install)
           lpfn = (idHook == WH_KEYBOARD ? SK_Proxy_KeyboardProc
@@ -698,17 +731,26 @@ SetWindowsHookExA_Detour (
 
         if (dwThreadId != 0)
         {
-          if (! __hooks._RealMouseProcs.count (dwThreadId) || 
-                __hooks._RealMouseProcs       [dwThreadId] == nullptr)
-          {     __hooks._RealMouseProcs       [dwThreadId] = lpfn;
-                                                   install = true;
+          if (    !__hooks._RealMouseProcs.count (dwThreadId) ||
+                   __hooks._RealMouseProcs       [dwThreadId] == nullptr)
+          {        __hooks._RealMouseProcs       [dwThreadId] = lpfn;
+            hook =&__hooks._RealMouseHooks       [dwThreadId];
+                                                      install = true;
           }
+
+          else
+            SK_LOGi0 ( L" * A mouse hook already exists for thread %d",
+                         dwThreadId );
         }
 
         else if (__hooks._RealMouseProc == nullptr)
         {        __hooks._RealMouseProc = lpfn;
+          hook =&__hooks._RealMouseHook;
                                 install = true;
         }
+
+        else
+          SK_LOGi0 (L" * A global mouse hook already exists");
 
         if (install)
           lpfn = (idHook == WH_MOUSE ? SK_Proxy_MouseProc
@@ -717,11 +759,16 @@ SetWindowsHookExA_Detour (
     } break;
   }
 
-  return
+  auto ret =
     SetWindowsHookExA_Original (
       idHook, lpfn,
               hmod, dwThreadId
     );
+
+  if (hook != nullptr)
+    *hook = ret;
+
+  return ret;
 }
 
 void

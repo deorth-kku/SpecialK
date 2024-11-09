@@ -43,14 +43,28 @@ extern "C" {
 DWORD SK_WGI_GamePollingThreadId = 0;
 
 bool
-SK_ImGui_WantGamepadCapture (void)
+SK_ImGui_WantGamepadCapture (bool update)
 {
+  static std::atomic <ULONG64> lastFrameCaptured = 0;
+  static std::atomic_bool      capture           = false;
+
+  if (! update)
+  {
+    return capture.load () || lastFrameCaptured > SK_GetFramesDrawn () - 2;
+  }
+
   // Do not block on first frame drawn unless explicitly disabled
   if (SK_GetFramesDrawn () < 1 && (config.input.gamepad.disabled_to_game != 1))
+  {
+    capture.store (false);
     return false;
+  }
 
   if (! SK_GImDefaultContext ())
+  {
+    capture.store (false);
     return false;
+  }
 
   auto _Return = [](BOOL bCapture) ->
   bool
@@ -139,12 +153,17 @@ SK_ImGui_WantGamepadCapture (void)
         }
       }
     }
-
+    
+    if    (bCapture) lastFrameCaptured = SK_GetFramesDrawn ();
+    capture.store
+          (bCapture);
+          (bCapture);
     return bCapture;
   };
 
   bool imgui_capture =
-    config.input.gamepad.disabled_to_game == SK_InputEnablement::Disabled;
+    SK_ImGuiEx_Visible || config.input.gamepad.disabled_to_game == SK_InputEnablement::Disabled;
+    // ^^^ Confirmation dialogs should always capture gamepad input
 
   if (SK_GImDefaultContext ())
   {

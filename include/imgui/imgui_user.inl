@@ -602,73 +602,6 @@ SK_ImGui_ProcessRawInput ( _In_      HRAWINPUT hRawInput,
     size;
 }
 
-bool
-SK_ImGui_WantMouseWarpFiltering (void)
-{
-  if (game_window.mouse.can_track && !game_window.mouse.inside && config.input.mouse.disabled_to_game == 2)
-  {
-    return true;
-  }
-
-  return false;
-}
-
-LONG
-SK_ImGui_DeltaTestMouse ( const POINTS& last_pos,
-                          const LPARAM& lParam,
-                          const short   threshold = 1 )
-{
-  bool filter_warps =
-    SK_ImGui_WantMouseWarpFiltering ();
-
-  POINT local {
-    GET_X_LPARAM (lParam),
-    GET_Y_LPARAM (lParam)
-  };
-
-  if ( filter_warps && ( last_pos.x != local.x ||
-                         last_pos.y != local.y ) )
-  {
-    bool filter = false;
-
-    // Filter out small movements / mouselook warps
-    //
-    //   This does create a weird deadzone in the center of the screen,
-    //     but most people will not notice ;)
-    //
-    if ( abs (last_pos.x - local.x) < threshold &&
-         abs (last_pos.y - local.y) < threshold )
-    {
-      filter = true;
-    }
-
-    static auto& io =
-      ImGui::GetIO ();
-
-    POINT center { static_cast <LONG> (io.DisplaySize.x / 2.0f),
-                   static_cast <LONG> (io.DisplaySize.y / 2.0f) };
-
-    SK_ImGui_Cursor.LocalToClient (&center);
-
-    // Now test the cursor against the center of the screen
-    if ( abs (center.x - local.x) <= (static_cast <float> (center.x) / (100.0f / config.input.mouse.antiwarp_deadzone)) &&
-         abs (center.y - local.y) <= (static_cast <float> (center.y) / (100.0f / config.input.mouse.antiwarp_deadzone)) )
-    {
-      filter = true;
-    }
-
-    // Dispose Without Processing
-    if (filter)
-    {
-      return
-        SK_ImGui_IsMouseRelevant ( ) ?
-                                  1  :  0;
-    }
-  }
-
-  return -1;
-}
-
 #include <dbt.h>
 
 // GetKeyboardLayout (...) is somewhat slow and it is unnecessary unless
@@ -712,52 +645,6 @@ MessageProc ( const HWND&   hWnd,
 
   switch (msg)
   {
-    // TODO: Take the bazillion different sources of input and translate them all into
-    //          a standard window message format for sanity's sake during filter evaluation.
-    case WM_APPCOMMAND:
-    {
-      if (hWnd == game_window.hWnd || IsChild (game_window.hWnd, hWnd))
-      {
-        switch (GET_DEVICE_LPARAM (lParam))
-        {
-          case FAPPCOMMAND_KEY:
-          {
-            OutputDebugStringW (L"WM_APPCOMMAND Keyboard Event");
-
-            //if (SK_ImGui_WantKeyboardCapture ())
-            //{
-            if (window_active)
-              return true;
-            //}
-          } break;
-
-          case FAPPCOMMAND_MOUSE:
-          {
-            if (SK_ImGui_WantMouseCapture ())
-            {
-              OutputDebugStringW (L"Removed WM_APPCOMMAND Mouse Event");
-              return true;
-            }
-
-            OutputDebugStringW (L"WM_APPCOMMAND Mouse Event");
-
-            LPARAM dwPos = static_cast <LPARAM> (GetMessagePos ());
-            LONG   lRet  = SK_ImGui_DeltaTestMouse (
-                                    *(const POINTS *)&last_pos,
-                   dwPos                           );
-
-            if (lRet >= 0)
-            {
-              OutputDebugStringW (L"Removed WM_APPCOMMAND Mouse Delta Failure");
-              return true;
-            }
-          } break;
-        }
-      }
-    } break;
-
-
-
     ////case WM_MOUSEACTIVATE:
     ////{
     ////  ActivateWindow (((HWND)wParam == hWnd));
@@ -1024,11 +911,8 @@ MessageProc ( const HWND&   hWnd,
       {
         SK_ImGui_UpdateMouseTracker ();
 
-        POINTS     xyPos = MAKEPOINTS (lParam);
-        LONG   lDeltaRet =
-          SK_ImGui_DeltaTestMouse (
-               std::exchange (last_pos, xyPos),
-                                       lParam);
+        POINTS                   xyPos = MAKEPOINTS (lParam);
+        std::exchange (last_pos, xyPos);
 
         POINT
           cursor_pos = {
@@ -1037,17 +921,6 @@ MessageProc ( const HWND&   hWnd,
           };
 
         SK_ImGui_Cursor.ClientToLocal (&cursor_pos);
-
-        // Return:
-        //
-        //   -1 if no filtering is desired
-        //    0 if message should propogate, but preserve internal cursor state
-        //    1 if message should be removed
-        //
-        if (     lDeltaRet >= 0 ) {
-          return lDeltaRet;
-        }
-
         SK_ImGui_Cursor.pos =           cursor_pos;
 
         io.MousePos = {
@@ -1454,8 +1327,6 @@ ImGui_WndProcHandler ( HWND   hWnd,   UINT   msg,
   bool handled          = MessageProc (hWnd, msg, wParam, lParam);
   bool filter_raw_input = (msg == WM_INPUT && handled && config.input.gamepad.hook_raw_input);
 
-  bool filter_warps     = SK_ImGui_WantMouseWarpFiltering ();
-
   UINT uMsg = msg;
 
   if (handled)
@@ -1472,8 +1343,7 @@ ImGui_WndProcHandler ( HWND   hWnd,   UINT   msg,
       ( ( ( uMsg >= WM_MOUSEFIRST && uMsg <= WM_MOUSELAST ) ||
           ( uMsg == WM_APPCOMMAND && GET_DEVICE_LPARAM (lParam) == FAPPCOMMAND_MOUSE ) ) &&
 
-          ( SK_ImGui_WantMouseCapture () ||
-            (filter_warps && uMsg == WM_MOUSEMOVE) )
+          ( SK_ImGui_WantMouseCapture () )
       );
 
     if ((wParam & 0xFF) < 7)
@@ -1639,6 +1509,10 @@ WINAPI
 SK_ImGui_ToggleEx ( bool& toggle_ui,
                     bool& toggle_nav )
 {
+  // Do not allow dismissing dialogs using toggle buttons...
+  if (SK_ImGuiEx_Visible)
+    return SK_ImGui_Active ();
+
   //
   // Only allow one toggle per-frame, even if we wind up calling
   //   this function multiple times to translate HID to XInput...
@@ -2174,6 +2048,15 @@ SK_ImGui_PollGamepad_EndFrame (XINPUT_STATE* pState)
           }
 
           if ((     state.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE) &&
+              (     state.Gamepad.wButtons & XINPUT_GAMEPAD_A)     &&
+            (!(last_state.Gamepad.wButtons & XINPUT_GAMEPAD_A)))
+          {
+            // Unassigned for now, SKIF's XInput wrapper activates the
+            //   screensaver when this is pressed...
+            bChordActivated = true;
+          }
+
+          if ((     state.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE) &&
               (     state.Gamepad.wButtons & XINPUT_GAMEPAD_BACK)  &&
             (!(last_state.Gamepad.wButtons & XINPUT_GAMEPAD_BACK)))
           {
@@ -2275,6 +2158,26 @@ SK_ImGui_PollGamepad_EndFrame (XINPUT_STATE* pState)
             bChordActivated = true;
           }
 
+          if ((     state.Gamepad.wButtons     &  XINPUT_GAMEPAD_GUIDE)             &&
+              (     state.Gamepad.bLeftTrigger >  XINPUT_GAMEPAD_TRIGGER_THRESHOLD) &&
+              (last_state.Gamepad.bLeftTrigger <= XINPUT_GAMEPAD_TRIGGER_THRESHOLD))
+          {
+            if (   IsIconic (game_window.hWnd))
+              SK_ShowWindow (game_window.hWnd, SW_SHOWNOACTIVATE);
+
+            bChordActivated = true;
+          }
+
+          if ((     state.Gamepad.wButtons      &  XINPUT_GAMEPAD_GUIDE)             &&
+              (     state.Gamepad.bRightTrigger >  XINPUT_GAMEPAD_TRIGGER_THRESHOLD) &&
+              (last_state.Gamepad.bRightTrigger <= XINPUT_GAMEPAD_TRIGGER_THRESHOLD))
+          {
+            if (!  IsIconic (game_window.hWnd))
+              SK_ShowWindow (game_window.hWnd, SW_MINIMIZE);
+
+            bChordActivated = true;
+          }
+
           if (!(     state.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE) &&
              ( (last_state.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE))&&
              (! bChordActivated) )
@@ -2368,8 +2271,9 @@ SK_ImGui_PollGamepad_EndFrame (XINPUT_STATE* pState)
       RtlZeroMemory (&state.Gamepad, sizeof (XINPUT_GAMEPAD));
 
 
-    if (                 bToggleVis||bToggleNav)
+    if (                 bToggleVis||bToggleNav) {
       SK_ImGui_ToggleEx (bToggleVis, bToggleNav);
+    }
   }
 
   static bool last_haptic = false;
@@ -3037,7 +2941,8 @@ DWORD SK_Input_LastGamepadActivity = 0;
 void
 SK_Input_UpdateGamepadActivityTimestamp (void)
 {
-  static DWORD _LastGamepadTimestamp = SK_Input_LastGamepadActivity;
+  static DWORD _LastGamepadTimestamp  = SK_Input_LastGamepadActivity;
+  static DWORD _Ignore_TimestampUntil = 0;
 
   static XINPUT_STATE
         xi_state_last = { };
@@ -3063,7 +2968,14 @@ SK_Input_UpdateGamepadActivityTimestamp (void)
               abs (xi_state.Gamepad.bLeftTrigger  - xi_state_last.Gamepad.bLeftTrigger ) > 40   ||
               abs (xi_state.Gamepad.bRightTrigger - xi_state_last.Gamepad.bRightTrigger) > 40 )
     {
-      SK_Input_LastGamepadActivity = SK::ControlPanel::current_time;
+      // Special treatment for the Guide button so that chords can be used while screensavers
+      //   are active.
+      if (!(xi_state_last.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE ||
+            xi_state_last.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE))
+        SK_Input_LastGamepadActivity = SK::ControlPanel::current_time;
+
+      if (xi_state.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE)
+          _Ignore_TimestampUntil = SK::ControlPanel::current_time + 500UL;
     }
 
     xi_state_last = xi_state;
@@ -3093,13 +3005,21 @@ SK_Input_UpdateGamepadActivityTimestamp (void)
               abs (hid_to_xi.Gamepad.bLeftTrigger  - hid_state.Gamepad.bLeftTrigger ) > 40   ||
               abs (hid_to_xi.Gamepad.bRightTrigger - hid_state.Gamepad.bRightTrigger) > 40 )
     {
-      SK_Input_LastGamepadActivity = SK::ControlPanel::current_time;
+      // Special treatment for the Guide button so that chords can be used while screensavers
+      //   are active.
+      if (!(hid_to_xi.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE ||
+            hid_to_xi.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE))
+        SK_Input_LastGamepadActivity = SK::ControlPanel::current_time;
+
+      if (hid_to_xi.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE)
+        _Ignore_TimestampUntil = SK::ControlPanel::current_time + 500UL;
     }
 
     hid_state.Gamepad = hid_to_xi.Gamepad;
   }
 
-  if (_LastGamepadTimestamp != SK_Input_LastGamepadActivity)
+  if (_LastGamepadTimestamp != SK_Input_LastGamepadActivity &&
+      _Ignore_TimestampUntil < SK_Input_LastGamepadActivity)
   {
     if (config.input.gamepad.blocks_screensaver)
     {
@@ -3120,7 +3040,8 @@ SK_Input_UpdateGamepadActivityTimestamp (void)
       }
     }
 
-    _LastGamepadTimestamp = SK_Input_LastGamepadActivity;
+    if (_Ignore_TimestampUntil < SK_Input_LastGamepadActivity)
+         _LastGamepadTimestamp = SK_Input_LastGamepadActivity;
   }
 }
 
@@ -3202,7 +3123,7 @@ SK_ImGui_UpdateMouseButtons (bool bActive, ImGuiIO& io)
 
 void
 SK_ImGui_User_NewFrame (void)
-{  
+{
   SK_Window_HandleOutOfBandMovement ();
 
   SK_HID_ProcessGamepadButtonBindings ();
@@ -3540,6 +3461,12 @@ SK_ImGui_User_NewFrame (void)
                                                         // Disabled to game is a form of capture,
                                                         //   but it is exempt from idle cursor logic
 
+  // When first opening the control panel, keep the cursor visible longer than usual
+  if (SK_ImGui_Cursor.last_toggle > SK::ControlPanel::current_time - 3333UL && SK_ImGui_Active ())
+    SK_ImGui_Cursor.idle = false;
+
+
+  // Update timestamps to block screensaver activation based on gamepad input
   SK_Input_UpdateGamepadActivityTimestamp ();
 
   if (config.input.cursor.manage && config.input.cursor.gamepad_deactivates && SK_Window_IsCursorActive ())
@@ -3561,7 +3488,14 @@ SK_ImGui_User_NewFrame (void)
 
   if (bManageCursor && game_window.mouse.inside)
   {
-    if (SK_Window_IsCursorActive () && SK_ImGui_Cursor.force != sk_cursor_state::Hidden)
+    // Hide the cursor during mouselook
+    if ((! SK_ImGui_CursorWarpingCooledDown ()) && SK_ImGui_Cursor.force != sk_cursor_state::Visible)
+    {
+      SK_SendMsgShowCursor (FALSE);
+    }
+
+    // Show the cursor during non-mouselook movement
+    else if (SK_Window_IsCursorActive () && SK_ImGui_Cursor.force != sk_cursor_state::Hidden)
     {
       if (! bHWCursorVisible)
       {
@@ -3572,6 +3506,7 @@ SK_ImGui_User_NewFrame (void)
       }
     }
 
+    // Hide the cursor when inactive
     else if (config.input.cursor.manage || SK_ImGui_Cursor.force == sk_cursor_state::Hidden)
     {
       if (bHWCursorVisible)
@@ -3734,6 +3669,13 @@ SK_ImGui_User_NewFrame (void)
 
   // Warn on low gamepad battery
   SK_Battery_UpdateRemainingPowerForAllDevices ();
+
+  // Update blocking status before proceeding to draw the next frame
+  SK_ImGui_IsMouseRelevant     (true);
+  SK_ImGui_WantKeyboardCapture (true);
+  SK_ImGui_WantMouseCapture    (true);
+  SK_ImGui_WantGamepadCapture  (true);
+  SK_IsGameWindowActive        (true);
 }
 
 bool

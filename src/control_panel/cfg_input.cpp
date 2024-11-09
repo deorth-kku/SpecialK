@@ -641,7 +641,7 @@ SK::ControlPanel::Input::Draw (void)
         ImGui::BeginGroup             ();
         ImGui::SeparatorEx            (ImGuiSeparatorFlags_Vertical);
         ImGui::SameLine               ();
-        SK_ImGui_CursorBoundaryConfig ();
+        SK_ImGui_CursorBoundaryConfig (false);
         ImGui::EndGroup               ();
       };
 
@@ -2944,6 +2944,21 @@ SK_ImGui_KeybindSelect (SK_Keybind* keybind, const char* szLabel)
   return ret;
 }
 
+volatile ULONG64 SK_ImGui_LastKeybindEditorFrame = 0;
+
+void
+SK_ImGui_BeginKeybindEditorFrame (void)
+{
+  WriteULong64Release (&SK_ImGui_LastKeybindEditorFrame, SK_GetFramesDrawn ());
+}
+
+ULONG64
+SK_ImGui_GetLastKeybindEditorFrame (void)
+{
+  return
+    ReadULong64Acquire (&SK_ImGui_LastKeybindEditorFrame);
+}
+
 SK_API
 void
 __stdcall
@@ -2963,6 +2978,8 @@ SK_ImGui_KeybindDialog (SK_Keybind* keybind)
   if (ImGui::BeginPopupModal (keybind->bind_name, nullptr, ImGuiWindowFlags_AlwaysAutoResize |
                                                            ImGuiWindowFlags_NoCollapse       | ImGuiWindowFlags_NoSavedSettings))
   {
+    SK_ImGui_LastKeybindEditorFrame = SK_GetFramesDrawn ();
+
     io.WantCaptureKeyboard = true;
 
     int i = 0;
@@ -3141,10 +3158,19 @@ SK_ImGui_GamepadComboDialog0 (SK_GamepadCombo_V0* combo)
 }
 
 void
-SK_ImGui_CursorBoundaryConfig (void)
+SK_ImGui_CursorBoundaryConfig (bool window_mgmt = false)
 {
-  ImGui::Text     ("Cursor Boundaries");
-  ImGui::TreePush ("");
+  ImGui::BeginGroup  (  );
+  ImGui::Text        ("Cursor Boundaries");
+  if (! window_mgmt)
+  {
+  ImGui::SameLine    (  );
+  ImGui::SeparatorEx (ImGuiSeparatorFlags_Vertical);
+  ImGui::SameLine    (  );
+  ImGui::Checkbox    ("Center Cursor on UI When Opening Overlay", &config.input.ui.center_cursor);
+  }
+  ImGui::EndGroup    (  );
+  ImGui::TreePush    ("");
   
   int  ovr     = 0;
   bool changed = false;

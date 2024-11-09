@@ -1,4 +1,71 @@
-﻿24.11.3
+﻿24.11.5.1
+=========
+ + Detect local ReShade DLLs as ReShade, and allow pressing the default
+     ReShade UI toggle keybind to work even if SK is blocking keyboard input
+       to the game.
+
+24.11.5
+=======
+ + Optimized keyboard handling in proxy Windows (Low-Level) Hook procedures
+ + Ensure that all keyboard input a game sees through a keyboard hook while
+     the window is not actually active are key releases, so that upon upon
+       alt-tabbing back, they do not do that stupid thing they usually do
+         where they think a key is permanently stuck down.
+
+24.11.4.5
+=========
+ + Removed the last remaining remnants of SK's original cursor anti-warp system.
+
+24.11.4.4
+=========
+ + Disable periodic LatentSync resync when G-Sync is active
+ + Remove warning about using LatentSync on VRR displays
+
+24.11.4.3
+=========
+ + Xbox/PlayStation + Right/Left trigger will Minimize/Restore the game.
+
+24.11.4.2
+=========
+ + The Xbox/PlayStation button on gamepads can now be used to activate a
+     chord input without that input counting for screensaver deactivation.
+   * In other words, you can use chorded feature like volume control while
+       a screensaver is active.
+ + Make UI navigation moving the mouse cursor a persistent (global) config
+     option, and turn it off by default.
+
+24.11.4.1
+=========
+ + Correctly restore hardware cursor image when closing the control panel and
+     cursor centering is turned off.
+
+24.11.4
+=======
+ + Ensure confirmation dialogs cannot be dismissed using the overlay toggle
+     keyboard / gamepad bindings, and gamepad is always captured while they
+       are waiting for a user response.
+ + Make cursor centering on SK's control panel into a configurable option.
+    * Refer to:  Input Management > Mouse Cursor; this is a global preference.
+
+24.11.3.3
+=========
+ + Hide mouse cursor when the game is using SetCursorPos (...) to implement
+     mouselook and cursor management is enabled.
+ + Ensure that upon closing the keybind editor dialog, the keybind configured
+     does not immediately trigger.
+
+24.11.3.2
+=========
+ + Change keyboard/mouse/gamepad blocking state so that it is evaluated
+     once per-frame frame and all other tests use the value set at the
+       beginning of a game's frame.
+
+24.11.3.1
+=========
+ + Handle UnhookWindowsHookEx (...) correctly, by setting the HHOOK handle
+     during SetWindowsHookEx{A|W} (...).
+
+24.11.3
 =======
  + Disable mouse while SK's control panel is open in Dragon Age The Veilguard.
 

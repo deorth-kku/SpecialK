@@ -65,6 +65,9 @@ namespace sk
   class ParameterStringW;
 };
 
+void    SK_ImGui_BeginKeybindEditorFrame   (void);
+ULONG64 SK_ImGui_GetLastKeybindEditorFrame (void);
+
 // Adds a parameter to store and retrieve the keybind in an INI / XML file
 struct SK_ConfigSerializedKeybind : public SK_Keybind
 {
@@ -1049,7 +1052,8 @@ struct sk_config_t
       bool    capture_keyboard    = false; // ^^^ Disabled by default because it interferes with cursor auto-hide
       bool    capture_gamepad     = false;
       bool    use_hw_cursor       =  true;
-      bool    use_raw_input       =  true;
+      bool    center_cursor       = false;
+      bool    nav_moves_mouse     = false;
       int     game_set_hw_cursor  =     0; // Not stored in INI, the number of times
     } ui;
 
@@ -1148,16 +1152,6 @@ struct sk_config_t
     } keyboard;                            //   ignore "disabled_to_game"
 
     struct mouse_s {
-      //
-      // Uses APIs such as DirectInput or RawInput that only send relative motion events
-      //   to derive the virtual position of the cursor, since the game hijacks the
-      //     physical position.
-      //
-      //   >> Ideally we want absolute cursor position every frame for the UI, but
-      //        that's not always possible. <<
-      //
-      float   antiwarp_deadzone   = 2.5F;
-
       // Translate WM_MOUSEWHEEL messages into actual events that will trigger
       //   other mouse APIs such as DirectInput and RawInput.
       //

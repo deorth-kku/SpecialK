@@ -51,6 +51,12 @@ BOOL
 WINAPI
 SK_SendMsgShowCursor (BOOL bShow)
 {
+  // Game is mouselooking if this is true
+  if (bShow && config.input.cursor.manage && !SK_ImGui_CursorWarpingCooledDown () && !SK_ImGui_WantMouseCapture ())
+  {
+    bShow = FALSE;
+  }
+
   if (game_window.hWnd != 0 && IsWindow (game_window.hWnd))
   {
          if (  bShow) PostMessageA (game_window.hWnd, game_window.messages [game_window.messages->ShowCursor].uiMessage, 0, 0);
@@ -278,26 +284,44 @@ SK_ImGui_IsAnythingHovered (void)
 }
 
 bool
-SK_ImGui_IsMouseRelevantEx (void)
+SK_ImGui_IsMouseRelevantEx (bool update)
 {
-  bool relevant =
+  static std::atomic_bool relevant = false;
+
+  if (! update)
+    return relevant.load ();
+
+  bool bRelevant =
     config.input.mouse.disabled_to_game || SK_ImGui_Active ();
 
-  if (! relevant)
+  if (! bRelevant)
   {
     // SK_ImGui_Active () returns true for the full-blown config UI;
     //   we also have floating widgets that may capture mouse input.
-    relevant =
+    bRelevant =
       SK_ImGui_IsAnythingHovered ();
   }
 
-  return relevant;
+  relevant.store (bRelevant);
+
+  return bRelevant;
 }
 
 bool
-SK_ImGui_IsMouseRelevant (void)
+SK_ImGui_IsMouseRelevant (bool update)
 {
-  return SK_ImGui_IsMouseRelevantEx ();
+  static std::atomic_bool relevant = false;
+
+  if (! update)
+    return relevant.load ();
+
+  bool bRelevant =
+    SK_ImGui_IsMouseRelevantEx (update);
+
+  relevant.store (bRelevant);
+
+  return
+    bRelevant;
 }
 
 void
@@ -530,7 +554,7 @@ SK_ImGui_WantMouseCaptureEx (DWORD dwReasonMask)
 
   bool imgui_capture = false;
 
-  if (SK_ImGui_IsMouseRelevantEx ())
+  if (SK_ImGui_IsMouseRelevantEx (false))
   {
     static const auto& io =
       ImGui::GetIO ();
@@ -566,10 +590,25 @@ SK_ImGui_WantHWCursor (void)
 }
 
 bool
-SK_ImGui_WantMouseCapture (void)
+SK_ImGui_WantMouseCapture (bool update)
 {
-  return
-    SK_ImGui_WantMouseCaptureEx (0xFFFF);
+  static std::atomic_bool               capture  = false;
+  static std::atomic <ULONG64> lastFrameCaptured = 0;
+
+  if (! update)
+    return capture.load () || lastFrameCaptured > SK_GetFramesDrawn () - 2;
+
+  capture.store (
+    SK_ImGui_WantMouseCaptureEx (0xFFFF)
+  );
+
+  bool bCapture =
+        capture.load ();
+
+  if (bCapture) lastFrameCaptured =
+              SK_GetFramesDrawn ();
+
+  return bCapture;
 }
 
 
@@ -598,12 +637,12 @@ HCURSOR GetGameCursor (void)
 
 bool
 __stdcall
-SK_IsGameWindowActive (void)
+SK_IsGameWindowActive (bool activate_if_in_limbo)
 {
   bool bActive =
     game_window.active;
 
-  if (! bActive)
+  if ((! bActive) && activate_if_in_limbo)
   {
     HWND hWndForeground = SK_GetForegroundWindow ();
 
@@ -650,22 +689,24 @@ SK_IsGameWindowActive (void)
   {
     game_window.active = true;
 
-    // This only activates the window if performed on the same thread as the
-    //   game's window, so don't do this if called from a different thread.
-    if (                         0 != SK_Win32_BackgroundHWND &&
-         SK_GetForegroundWindow () == SK_Win32_BackgroundHWND &&
-             GetCurrentThreadId () == GetWindowThreadProcessId (game_window.hWnd, nullptr) )
+    if (activate_if_in_limbo)
     {
-      game_window.active = true;
+      // This only activates the window if performed on the same thread as the
+      //   game's window, so don't do this if called from a different thread.
+      if (                         0 != SK_Win32_BackgroundHWND &&
+           SK_GetForegroundWindow () == SK_Win32_BackgroundHWND &&
+               GetCurrentThreadId () == GetWindowThreadProcessId (game_window.hWnd, nullptr) )
+      {
+        game_window.active = true;
 
-      BringWindowToTop    (game_window.hWnd);
-      SetWindowPos        ( SK_Win32_BackgroundHWND, game_window.hWnd,
-                                  0, 0,
-                                  0, 0,
-                                    SWP_NOMOVE     | SWP_NOSIZE |
-                             SWP_NOACTIVATE );
-      SetForegroundWindow (game_window.hWnd);
-      SetFocus            (game_window.hWnd);
+        BringWindowToTop    (game_window.hWnd);
+        SetWindowPos        (SK_Win32_BackgroundHWND, game_window.hWnd,
+                                   0, 0,
+                                   0, 0,
+                                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        SetForegroundWindow (game_window.hWnd);
+        SetFocus            (game_window.hWnd);
+      }
     }
   }
 
@@ -702,6 +743,8 @@ ImGui_ToggleCursor (void)
   static auto& io =
     ImGui::GetIO ();
 
+  static POINT orig_pos;
+
   if (! SK_ImGui_Cursor.visible)
   {
     POINT                           pos = { };
@@ -710,28 +753,44 @@ ImGui_ToggleCursor (void)
 
     // Save original cursor position
     SK_ImGui_Cursor.orig_pos    =   pos;
+    orig_pos                    =   pos;
     SK_ImGui_Cursor.idle        = false;
+    SK_ImGui_Cursor.last_toggle = SK::ControlPanel::current_time;
     io.WantCaptureMouse         =  true;
 
-    // Move the cursor if it's not over any of SK's UI
-    if (! SK_ImGui_IsAnythingHovered ())
+    if (config.input.ui.center_cursor)
     {
-      SK_ImGui_CenterCursorOnWindow ();
+      // Move the cursor if it's not over any of SK's UI
+      if (! SK_ImGui_IsAnythingHovered ())
+      {
+        SK_ImGui_CenterCursorOnWindow ();
+      }
     }
   }
 
   else
   {
     SK_ImGui_Cursor.idle = true;
+    io.WantCaptureMouse  = false;
 
-    if (! SK_ImGui_IsAnythingHovered ())
+    if (config.input.ui.center_cursor)
     {
-      POINT                            screen =
-       SK_ImGui_Cursor.orig_pos;
+      POINT                            screen = orig_pos;
+       SK_ImGui_Cursor.orig_pos               = orig_pos;
        SK_ImGui_Cursor.LocalToScreen (&screen);
        SK_SetCursorPos               ( screen.x,
                                        screen.y );
     }
+
+    // Restore the game's cursor
+    static auto Send_WM_SETCURSOR = [&](void)
+    {
+      SK_COMPAT_SafeCallProc (&game_window,
+              game_window.hWnd,                       WM_SETCURSOR,
+      (WPARAM)game_window.hWnd, MAKELPARAM (HTCLIENT, WM_MOUSEMOVE));
+    };
+
+    Send_WM_SETCURSOR ();
   }
 
   SK_ImGui_Cursor.visible = (! SK_ImGui_Cursor.visible);
@@ -936,6 +995,24 @@ static const DWORD kCursorWarpCooldown = 125UL;
 static       POINT s_GameSetCursorPos;
 static       DWORD s_GameSetCursorPosTime;
 
+DWORD
+SK_ImGui_GetLastCursorWarpTime (void)
+{
+  return s_GameSetCursorPosTime;
+}
+
+void
+SK_ImGui_UpdateLastCursorWarpTime (void)
+{
+  s_GameSetCursorPosTime = SK_timeGetTime ();
+}
+
+bool
+SK_ImGui_CursorWarpingCooledDown (void)
+{
+  return s_GameSetCursorPosTime < SK::ControlPanel::current_time - kCursorWarpCooldown;
+}
+
 BOOL
 WINAPI
 GetCursorPos_Detour (LPPOINT lpPoint)
@@ -945,24 +1022,71 @@ GetCursorPos_Detour (LPPOINT lpPoint)
   if (lpPoint == nullptr)
     return FALSE;
 
+  //
+  // Allow games running as a background window with Continue Rendering enabled
+  //   to see the real cursor position as long as there is no window on top of it...
+  //
   if (SK_WantBackgroundRender () && (! SK_IsGameWindowActive ()))
   {
-    SK_Win32_Backend->markHidden (sk_win32_func::GetCursorPos);
+#if 0
+    POINT             ptCursor = {};
+    SK_GetCursorPos (&ptCursor);
 
-    *lpPoint = SK_ImGui_Cursor.orig_pos;
-    SK_ImGui_Cursor.LocalToScreen (lpPoint);
+    static POINT lastCursorPt = ptCursor;
+    static HWND  lastFgWindow = SK_GetForegroundWindow ();
+           HWND      FgWindow = SK_GetForegroundWindow ();
 
-    return TRUE;
+    if ((lastFgWindow != FgWindow || (ptCursor.x != lastCursorPt.x ||
+                                      ptCursor.y != lastCursorPt.y)) && (WindowFromPoint (ptCursor) != game_window.hWnd))
+    {
+      lastFgWindow = FgWindow;
+      lastCursorPt = ptCursor;
+#endif
+
+      SK_Win32_Backend->markHidden (sk_win32_func::GetCursorPos);
+
+      *lpPoint = SK_ImGui_Cursor.orig_pos;
+      SK_ImGui_Cursor.LocalToScreen (lpPoint);
+
+      return TRUE;
+#if 0
+    }
+
+    lastFgWindow = FgWindow;
+    lastCursorPt = ptCursor;
+#endif
   }
 
 
   if (SK_ImGui_IsMouseRelevant ())
   {
+    //
+    // Compute delta mouse coordinates for games that use cursor warping (i.e. mouselook)
+    //
     if (SK_ImGui_WantMouseCapture () || s_GameSetCursorPosTime >= SK_timeGetTime () - kCursorWarpCooldown)
     {
       SK_Win32_Backend->markHidden (sk_win32_func::GetCursorPos);
-
+#if 0
+      static POINT lastCapturedPt = s_GameSetCursorPos;
+             POINT currentMousePt;
+      
+      SK_GetCursorPos (&currentMousePt);
+#endif
       *lpPoint = s_GameSetCursorPos;
+#if 0
+      if (! SK_ImGui_WantMouseCapture())
+      {
+        POINT ptDelta = { currentMousePt.x - lastCapturedPt.x,
+                          currentMousePt.y - lastCapturedPt.y };
+
+        *lpPoint = { s_GameSetCursorPos.x + ptDelta.x,
+                     s_GameSetCursorPos.y + ptDelta.y };
+
+        s_GameSetCursorPos = *lpPoint;
+      }
+
+      lastCapturedPt = currentMousePt;
+#endif
 
       return TRUE;
     }

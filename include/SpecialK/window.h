@@ -72,7 +72,7 @@ enum WindowTopPreference
 
 
 void SK_HookWinAPI        (void);
-void SK_InstallWindowHook (HWND hWnd);
+bool SK_InstallWindowHook (HWND hWnd);
 void SK_InitWindow        (HWND hWnd, bool fullscreen_exclusive = false);
 void SK_AdjustWindow      (void);
 void SK_AdjustBorder      (void);
@@ -550,7 +550,7 @@ class SK_TLS;
 
 bool
 __stdcall
-SK_IsGameWindowActive (void);
+SK_IsGameWindowActive (bool activate_if_in_limbo = false);
 
 bool
 __stdcall

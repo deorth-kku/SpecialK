@@ -303,6 +303,7 @@ struct scanline_target_s {
 
       if (        signals.resync.isValid ())
         SetEvent (signals.resync);
+      
     }
 
     void notifyAcquired (void)
@@ -1446,7 +1447,7 @@ SK::Framerate::Limiter::wait (void)
   {
     background = (! background);
 
-    __scanline.lock.requestResync ();
+    //__scanline.lock.requestResync ();
   }
 
 
@@ -2059,13 +2060,18 @@ SK::Framerate::Limiter::wait (void)
 
     bool bSync = false;
 
-    static int                     iTry  = 0; // First time signals resync
-    if (                           iTry == 0 || (
-      config.render.framerate.latent_sync.scanline_resync != 0 &&
-                                  (iTry++ %
-        config.render.framerate.latent_sync.scanline_resync) == 0
-                                                 )
-       )                                bSync = true;
+    static int iSkips = 0;
+    static int                       iTry  = 0; // First time signals resync
+    if (                             iTry == 0 || (rb.gsync_state.active == false || (++iSkips % 50) == 0) && (
+        config.render.framerate.latent_sync.scanline_resync  != 0 &&
+                                    (iTry++ %
+        config.render.framerate.latent_sync.scanline_resync) == 0 )
+       )
+    {
+      bSync  = true;
+      iSkips = 0;
+    }
+
     if (D3DKMTGetScanLine != nullptr && bSync)
     {
       __scanline.lock.requestResync ();
