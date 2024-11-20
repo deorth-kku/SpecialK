@@ -2892,9 +2892,12 @@ SK_ImGui_FallbackTrackMouseEvent (POINT& cursor_pos)
         last.hWndTop =
           WindowFromPoint (cursor_pos);
       }
+
       else
+      {
         last.hWndTop    = game_window.hWnd;
         last.cursor_pos =  cursor_pos;
+      }
     }
   
     hWndTop =
@@ -2970,8 +2973,7 @@ SK_Input_UpdateGamepadActivityTimestamp (void)
     {
       // Special treatment for the Guide button so that chords can be used while screensavers
       //   are active.
-      if (!(xi_state_last.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE ||
-            xi_state_last.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE))
+      if (!(xi_state_last.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE))
         SK_Input_LastGamepadActivity = SK::ControlPanel::current_time;
 
       if (xi_state.Gamepad.wButtons & XINPUT_GAMEPAD_GUIDE)

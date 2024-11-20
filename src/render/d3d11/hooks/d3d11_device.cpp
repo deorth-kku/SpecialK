@@ -161,6 +161,44 @@ D3D11Dev_CreateShaderResourceView_Override (
   if (pResource == nullptr)
     return E_INVALIDARG;
 
+  if (SK_IsCurrentGame (SK_GAME_ID::Metaphor) &&
+                       pDesc != nullptr       &&
+                       pDesc->ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D)
+  {
+#if 0
+    // Depth Buffer Upgrade for Less Aliasing...
+    if (                                 pDesc ->Format == DXGI_FORMAT_R24_UNORM_X8_TYPELESS)
+      ((D3D11_SHADER_RESOURCE_VIEW_DESC*)pDesc)->Format  = DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+    else if (                            pDesc ->Format == DXGI_FORMAT_X24_TYPELESS_G8_UINT)
+      ((D3D11_SHADER_RESOURCE_VIEW_DESC*)pDesc)->Format  = DXGI_FORMAT_X32_TYPELESS_G8X24_UINT;
+#endif
+
+    SK_ComQIPtr <ID3D11Texture2D>
+                      pTex (pResource);
+    D3D11_TEXTURE2D_DESC texDesc = {};
+    pTex->GetDesc      (&texDesc);
+
+    if (DirectX::IsCompressed (pDesc->Format))
+    {
+      if (pDesc->Format == DXGI_FORMAT_BC7_UNORM_SRGB &&
+        texDesc. Format == DXGI_FORMAT_BC7_UNORM)
+      {
+        ((D3D11_SHADER_RESOURCE_VIEW_DESC*)pDesc)->Format = DXGI_FORMAT_BC7_UNORM;
+        return E_INVALIDARG;
+      }
+
+      ((D3D11_SHADER_RESOURCE_VIEW_DESC*)pDesc)->Texture2D.MostDetailedMip =        0;
+      ((D3D11_SHADER_RESOURCE_VIEW_DESC*)pDesc)->Texture2D.MipLevels       = (UINT)-1;
+    }
+
+    else if (pDesc->Format == DXGI_FORMAT_R8_UNORM  &&
+          (texDesc. Format == DXGI_FORMAT_BC7_UNORM ||
+          (texDesc. Format == DXGI_FORMAT_BC7_UNORM_SRGB)))
+    {
+      return E_INVALIDARG;
+    }
+  }
+
 #ifdef _SK_D3D11_VALIDATE_DEVICE_RESOURCES
   if (pResource != nullptr)
   {
@@ -186,17 +224,17 @@ D3D11Dev_CreateShaderResourceView_Override (
   }
 #endif
 
+  D3D11_SHADER_RESOURCE_VIEW_DESC desc =
+  {                .Format          = DXGI_FORMAT_UNKNOWN,
+                   .ViewDimension   = D3D11_SRV_DIMENSION_TEXTURE2D,
+    .Texture2D = { .MostDetailedMip = 0, .MipLevels = (UINT)-1 }
+  };
+
   D3D11_RESOURCE_DIMENSION   dim;
   pResource->GetType       (&dim);
 
   if (dim == D3D11_RESOURCE_DIMENSION_TEXTURE2D)
   {
-    D3D11_SHADER_RESOURCE_VIEW_DESC desc =
-    {                .Format          = DXGI_FORMAT_UNKNOWN,
-                     .ViewDimension   = D3D11_SRV_DIMENSION_TEXTURE2D,
-      .Texture2D = { .MostDetailedMip = 0, .MipLevels = (UINT)-1 }
-    };
-
     if (pDesc != nullptr)
       desc = *pDesc;
 
@@ -476,6 +514,23 @@ D3D11Dev_CreateShaderResourceView1_Override (
   if (pResource == nullptr)
     return E_INVALIDARG;
 
+  if (SK_GetCurrentGameID () == SK_GAME_ID::Metaphor &&
+                       pDesc != nullptr              &&
+                       pDesc->ViewDimension == D3D11_SRV_DIMENSION_TEXTURE2D)
+  {
+    if (DirectX::IsCompressed (pDesc->Format))
+    {
+      ((D3D11_SHADER_RESOURCE_VIEW_DESC*)pDesc)->Texture2D.MostDetailedMip =        0;
+      ((D3D11_SHADER_RESOURCE_VIEW_DESC*)pDesc)->Texture2D.MipLevels       = (UINT)-1;
+    }
+  }
+
+  D3D11_SHADER_RESOURCE_VIEW_DESC1 desc =
+  {                .Format          = DXGI_FORMAT_UNKNOWN,
+                   .ViewDimension   = D3D11_SRV_DIMENSION_TEXTURE2D,
+    .Texture2D = { .MostDetailedMip = 0, .MipLevels = (UINT)-1 }
+  };
+
 #ifdef _SK_D3D11_VALIDATE_DEVICE_RESOURCES
   if (pResource != nullptr)
   {
@@ -506,12 +561,6 @@ D3D11Dev_CreateShaderResourceView1_Override (
 
   if (dim == D3D11_RESOURCE_DIMENSION_TEXTURE2D)
   {
-    D3D11_SHADER_RESOURCE_VIEW_DESC1 desc =
-    {                .Format          = DXGI_FORMAT_UNKNOWN,
-                     .ViewDimension   = D3D11_SRV_DIMENSION_TEXTURE2D,
-      .Texture2D = { .MostDetailedMip = 0, .MipLevels = (UINT)-1 }
-    };
-
     if (pDesc != nullptr)
       desc = *pDesc;
 
@@ -774,11 +823,37 @@ STDMETHODCALLTYPE
 D3D11Dev_CreateDepthStencilView_Override (
   _In_            ID3D11Device                  *This,
   _In_            ID3D11Resource                *pResource,
-  _In_opt_  const D3D11_DEPTH_STENCIL_VIEW_DESC *pDesc,
+  _In_opt_  const D3D11_DEPTH_STENCIL_VIEW_DESC *pDesc_,
   _Out_opt_       ID3D11DepthStencilView        **ppDepthStencilView )
 {
   if (pResource == nullptr)
     return E_INVALIDARG;
+
+  D3D11_DEPTH_STENCIL_VIEW_DESC _desc;
+
+  if (pDesc_ != nullptr)
+    _desc = *pDesc_;
+
+  auto pDesc =
+      (pDesc_ != nullptr) ?
+      &_desc  :  nullptr;
+
+#if 0
+  if (pDesc != nullptr && SK_IsCurrentGame (SK_GAME_ID::Metaphor))
+  {
+    // Depth Buffer Upgrade for Less Aliasing...
+    if (pDesc->Format == DXGI_FORMAT_D24_UNORM_S8_UINT)
+        pDesc->Format  = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+    else
+    {
+      if (pDesc->Format == DXGI_FORMAT_UNKNOWN ||
+          pDesc->Format == DXGI_FORMAT_R32G8X24_TYPELESS)
+      {
+        pDesc->Format  = DXGI_FORMAT_D32_FLOAT_S8X24_UINT;
+      }
+    }
+  }
+#endif
 
 #ifdef _SK_D3D11_VALIDATE_DEVICE_RESOURCES
   if (pResource != nullptr)
@@ -1055,6 +1130,12 @@ D3D11Dev_CreateUnorderedAccessView1_Override (
   }
 #endif
 
+  D3D11_UNORDERED_ACCESS_VIEW_DESC1 desc =
+  { .Format         = DXGI_FORMAT_UNKNOWN,
+    .ViewDimension  = D3D11_UAV_DIMENSION_TEXTURE2D,
+    .Texture2D      = { .MipSlice = 0 }
+  };
+
   if (SK_ComQIPtr <ID3D11Texture2D> pTex (pResource);
                                     pTex != nullptr)
   {
@@ -1063,12 +1144,6 @@ D3D11Dev_CreateUnorderedAccessView1_Override (
 
     if (dim == D3D11_RESOURCE_DIMENSION_TEXTURE2D)
     {
-      D3D11_UNORDERED_ACCESS_VIEW_DESC1 desc =
-      { .Format         = DXGI_FORMAT_UNKNOWN,
-        .ViewDimension  = D3D11_UAV_DIMENSION_TEXTURE2D,
-        .Texture2D      = { .MipSlice = 0 }
-      };
-
       if (pDesc != nullptr)
         desc = *pDesc;
 
@@ -1211,6 +1286,15 @@ D3D11Dev_CreateSamplerState_Override
 
   D3D11_SAMPLER_DESC new_desc = *pSamplerDesc;
 
+#if 0
+  extern const char*
+  SK_D3D11_FilterToStr (D3D11_FILTER filter) noexcept;
+
+  dll_log->Log ( L"CreateSamplerState - Filter: %hs, MaxAniso: %lu, MipLODBias: %3.1f, MinLOD: %3.1f, MaxLOD: %3.1f, Comparison: %d, U:%d,V:%d,W:%d - %ws",
+                 SK_D3D11_FilterToStr (new_desc.Filter), new_desc.MaxAnisotropy, new_desc.MipLODBias, new_desc.MinLOD, new_desc.MaxLOD,
+                 new_desc.ComparisonFunc, new_desc.AddressU, new_desc.AddressV, new_desc.AddressW, SK_SummarizeCaller ().c_str () );
+#endif
+
 #pragma region "UglyGameHacksThatShouldNotBeHere"
   static const bool bShenmue =
     SK_GetCurrentGameID () == SK_GAME_ID::Shenmue;
@@ -1220,10 +1304,6 @@ D3D11Dev_CreateSamplerState_Override
     config.textures.d3d11.uncompressed_mips = true;
     config.textures.d3d11.cache_gen_mips    = true;
     config.textures.d3d11.generate_mips     = true;
-
-    ///dll_log.Log ( L"CreateSamplerState - Filter: %s, MaxAniso: %lu, MipLODBias: %f, MinLOD: %f, MaxLOD: %f, Comparison: %x, U:%x,V:%x,W:%x - %ws",
-    ///             SK_D3D11_FilterToStr (new_desc.Filter), new_desc.MaxAnisotropy, new_desc.MipLODBias, new_desc.MinLOD, new_desc.MaxLOD,
-    ///             new_desc.ComparisonFunc, new_desc.AddressU, new_desc.AddressV, new_desc.AddressW, SK_SummarizeCaller ().c_str () );
 
     if (new_desc.Filter != D3D11_FILTER_MIN_MAG_MIP_POINT)
     {
@@ -1397,6 +1477,30 @@ D3D11Dev_CreateSamplerState_Override
 #endif
 #pragma endregion
 
+#if 1
+  if (SK_GetCurrentGameID () == SK_GAME_ID::Metaphor)
+  {
+    if ( new_desc.Filter         <= D3D11_FILTER_ANISOTROPIC       &&
+        (new_desc.Filter         >  D3D11_FILTER_MIN_MAG_MIP_POINT ||
+        (new_desc.AddressW       != D3D11_TEXTURE_ADDRESS_CLAMP    ||
+         new_desc.AddressV       != D3D11_TEXTURE_ADDRESS_CLAMP    ||
+         new_desc.AddressU       != D3D11_TEXTURE_ADDRESS_CLAMP))  &&
+         new_desc.ComparisonFunc == D3D11_COMPARISON_NEVER )
+    {
+      new_desc.Filter = D3D11_FILTER_ANISOTROPIC;
+    }
+    else if ( new_desc.Filter         <= D3D11_FILTER_ANISOTROPIC       &&
+             (new_desc.Filter         >  D3D11_FILTER_MIN_MAG_MIP_POINT ||
+             (new_desc.AddressW       == D3D11_TEXTURE_ADDRESS_CLAMP    &&
+              new_desc.AddressV       == D3D11_TEXTURE_ADDRESS_CLAMP    &&
+              new_desc.AddressU       == D3D11_TEXTURE_ADDRESS_CLAMP))  &&
+              new_desc.ComparisonFunc == D3D11_COMPARISON_NEVER )
+    {
+      new_desc.Filter = D3D11_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR;
+    }
+  }
+#endif
+
   //
   // Modern codepath for generic configurable sampler overrides
   //   (as opposed to the myriad of game-specific hacks above)
@@ -1408,9 +1512,7 @@ D3D11Dev_CreateSamplerState_Override
   if (config.render.d3d12.force_lod_bias != 0.0f)
   {
     if ( pSamplerDesc->MinLOD !=
-         pSamplerDesc->MaxLOD && ( pSamplerDesc->ComparisonFunc == D3D11_COMPARISON_ALWAYS ||
-                                   pSamplerDesc->ComparisonFunc == 0 /*WTF does 0 imply?*/ ||
-                                   pSamplerDesc->ComparisonFunc == D3D11_COMPARISON_NEVER ) )
+         pSamplerDesc->MaxLOD && pSamplerDesc->ComparisonFunc == D3D11_COMPARISON_NEVER )
     {
       new_desc.MipLODBias =
         config.render.d3d12.force_lod_bias;

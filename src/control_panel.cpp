@@ -585,7 +585,7 @@ bool  SK_ImGui_UnconfirmedDisplayChanges = false;
 DWORD SK_ImGui_DisplayChangeTime         = 0;
 
 void
-SK_ImGui_ConfirmDisplaySettings (bool *pDirty_, std::string display_name_, DEVMODEW orig_mode_)
+SK_ImGui_ConfirmDisplaySettings (bool *pDirty_, std::string display_name_, DEVMODEW& orig_mode_)
 {
   static bool              *pDirty = nullptr;
   static std::string  display_name = "";
@@ -828,31 +828,9 @@ SK_ImGui_ControlPanelTitle (void)
   auto appname =
     SK_GetFriendlyAppName ();
 
-  if (! appname.empty ())//bSteam || bEpic || *rb.windows.focus.title != L'\0')
+  if (! appname.empty ())
   {
-    //static std::string window_title =
-    //  SK_WideCharToUTF8 (rb.windows.focus.title);
-    //
-    //// For non-Steam/Epic games, if the window title changes, then update
-    ////   the control panel's title...
-    //if (! (bSteam || bEpic))
-    //{
-    //  static ULONG64     last_changed = 0;
-    //  if (std::exchange (last_changed, rb.windows.focus.last_changed) !=
-    //                                   rb.windows.focus.last_changed)
-    //  {
-    //    window_title =
-    //      SK_WideCharToUTF8 (rb.windows.focus.title);
-    //  }
-    //}
-    //
-    //std::string& appname = bSteam ?
-    //   SK::SteamAPI::AppName ()   :
-    //                       bEpic  ?
-    //        SK::EOS::AppName ()   : window_title;
-
-    if (! appname.empty ())
-      title += "      -      ";
+    title += "      -      ";
 
     if (config.platform.show_playtime)
     {
@@ -1225,7 +1203,7 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
     display_list +=
       SK_WideCharToUTF8 (
         rb.displays [output].name
-      ).c_str ();
+      );
 
     display_list += '\0';
   }
@@ -1383,7 +1361,7 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
         rb.present_interval == 1 ? "  ON\0"           :
         rb.present_interval == 2 ? "  1/2 (No VRR)\0" :
         rb.present_interval == 3 ? "  1/3 (No VRR)\0" :
-        rb.present_interval == 3 ? "  1/4 (No VRR)\0" :
+        rb.present_interval == 4 ? "  1/4 (No VRR)\0" :
                                    "  ??? (Invalid)\0";
 
       static constexpr char* no_override_label = "  No Override\0";
@@ -1515,7 +1493,7 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
 
       output_list += "  ";
       output_list +=
-        end_point.name_.c_str ();
+        end_point.name_;
 
       output_list += '\0';
 
@@ -1854,9 +1832,8 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
     config.utility.save_async ();
   }
 
-  if (ImGui::IsItemHovered ())
+  if (ImGui::BeginItemTooltip ())
   {
-    ImGui::BeginTooltip    ();
     ImGui::TextUnformatted ( "Fixes missing in-game resolution options and "
                              "over-sized game windows");
     ImGui::TextColored     ( ImVec4 (1.f, 1.f, 0.f, 1.f),
@@ -1890,7 +1867,7 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
       {
         // Revert to no preference
         config.display.monitor_idx      = 0;
-        config.display.monitor_path_ccd = L"";
+        config.display.monitor_path_ccd.clear ();
       }
 
       config.utility.save_async ();
@@ -1914,7 +1891,7 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
     {
       // Revert to no preference
       config.display.monitor_idx      = 0;
-      config.display.monitor_path_ccd = L"";
+      config.display.monitor_path_ccd.clear ();
 
       config.display.resolution.override.x = 0;
       config.display.resolution.override.y = 0;
@@ -2091,9 +2068,8 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
     config.utility.save_async ();
   }
 
-  if (ImGui::IsItemHovered ())
+  if (ImGui::BeginItemTooltip ())
   {
-    ImGui::BeginTooltip ();
     ImGui::Text         ("Fills the game's monitor with a background wherever"
                          " the game's window does not cover");
     ImGui::Separator    ();
@@ -2481,14 +2457,13 @@ DisplayModeMenu (bool windowed)
         rb.requestFullscreenMode (force);
       }
 
-      if (ImGui::IsItemHovered ())
+      if (ImGui::BeginItemTooltip ())
       {
-        ImGui::BeginTooltip ( );
-        ImGui::Text         ( "Override Scaling Mode" );
-        ImGui::Separator    ( );
-        ImGui::BulletText   ( "Set to Unspecified to CORRECTLY run "
-                              "Fullscreen Display Native Resolution" );
-        ImGui::EndTooltip   ( );
+        ImGui::Text       ("Override Scaling Mode");
+        ImGui::Separator  ();
+        ImGui::BulletText ("Set to Unspecified to CORRECTLY run "
+                           "Fullscreen Display Native Resolution");
+        ImGui::EndTooltip ();
       }
 
       static DXGI_SWAP_CHAIN_DESC
@@ -3074,9 +3049,8 @@ SK_NV_LatencyControlPanel (void)
       config.utility.save_async ();
     }
 
-    if (ImGui::IsItemHovered ())
+    if (ImGui::BeginItemTooltip ())
     {
-      ImGui::BeginTooltip    ();
       ImGui::TextUnformatted ("Some games have -really- broken implementations of Reflex.");
       ImGui::Separator       ();
       ImGui::BulletText      ("It may be better to disable native Reflex and use SK's implementation in some cases.");
@@ -3438,14 +3412,13 @@ SK_ImGui_ControlPanel (void)
               bLAA = true;
           }
 
-          if (ImGui::IsItemHovered ())
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip ();
-            ImGui::Text         ("Allows 32-bit games to use more than 2 GiB of RAM");
-            ImGui::Separator    ();
-            ImGui::BulletText   ("The current game is -not- Large Address Aware");
-            ImGui::BulletText   ("Fully patching the game requires re-launching it");
-            ImGui::EndTooltip   ();
+            ImGui::Text       ("Allows 32-bit games to use more than 2 GiB of RAM");
+            ImGui::Separator  ();
+            ImGui::BulletText ("The current game is -not- Large Address Aware");
+            ImGui::BulletText ("Fully patching the game requires re-launching it");
+            ImGui::EndTooltip ();
           }
         }
 
@@ -3528,9 +3501,8 @@ SK_ImGui_ControlPanel (void)
       auto SDRTooltip =
       [&](void)
       {
-        if (ImGui::IsItemHovered ( ))
+        if (ImGui::BeginItemTooltip ())
         {
-          ImGui::BeginTooltip    ( );
           ImGui::TextUnformatted ("Controls Luminance of Overlays while in HDR Mode");
           ImGui::Separator       ( );
 
@@ -3692,13 +3664,13 @@ SK_ImGui_ControlPanel (void)
             ImGui::Checkbox ( "Keep Full-Range HDR Screenshots",
                                 &config.screenshots.png_compress );
 
-                int clipboard_selection =
+        int clipboard_selection =
           config.screenshots.copy_to_clipboard   ?
           config.screenshots.allow_hdr_clipboard ? 1 : 2 : 0;
 
         if (ImGui::Combo ( "Clipboard Format", &clipboard_selection,
                            "None (Do Not Copy)\0"
-                           "Lossless HDR\0"
+                           "HDR Encoded PNG\0"
                            "Tone-mapped SDR\0\0" ))
         {
           hdr_changed = true;
@@ -3712,14 +3684,65 @@ SK_ImGui_ControlPanel (void)
             (clipboard_selection > 0);
         }
 
-        if (ImGui::IsItemHovered ())
+        if (ImGui::BeginItemTooltip ())
         {
-          ImGui::BeginTooltip    ();
-          ImGui::TextUnformatted ("Lossless HDR copies are compatible with SKIV and Discord");
+          ImGui::TextUnformatted ("HDR Encoded PNGs are compatible with Discord and most web browsers");
           ImGui::Separator       ();
-          ImGui::BulletText      ("Instead of tone mapping HDR->SDR, clipboard will contain a real HDR image.");
-          ImGui::BulletText      ("HDR copies have limited compatibility, and cannot be pasted to MSPaint, etc.");
+          ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (.75f, .75f, .75f, 1.f));
+          ImGui::BulletText      ("Instead of tone mapping HDR->SDR, the clipboard will contain a real HDR image.");
+          ImGui::BulletText      ("HDR copies have limited compatibility - pasting only works in SKIV and browser-based apps.");
+          ImGui::Separator       ();
+          ImGui::TextColored     (ImVec4 (.4f, .8f, 1.f, 1.f), " " ICON_FA_INFO_CIRCLE);
+          ImGui::SameLine        ();
+          ImGui::TextColored     (ImVec4 (1.f, 1.f, 1.f, 1.f), "Special K Image Viewer");
+          ImGui::SameLine        ();
+          ImGui::TextUnformatted ("(SKIV) can display HDR PNGs on SDR displays and export to SDR");
+          ImGui::PopStyleColor   ();
           ImGui::EndTooltip      ();
+        }
+
+        if ((config.screenshots.copy_to_clipboard &&
+             config.screenshots.allow_hdr_clipboard) || config.screenshots.use_hdr_png)
+        {
+          hdr_changed |=
+            ImGui::SliderInt ("PNG Quality", &config.screenshots.max_st2084_bits, 7, 16, "%d-bit Limited ST.2084");
+
+          if (ImGui::BeginItemTooltip ())
+          {
+            ImGui::Spacing         ( );
+            ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (1.f, 1.f, 1.f, 1.f));
+            ImGui::TextUnformatted ("Reduced Quality\t\t");
+            ImGui::SameLine        (); auto x_pos =
+            ImGui::GetCursorPosX   ();
+            ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (.75f, .75f, .75f, 1.f));
+            ImGui::TextUnformatted ("(7-bit - 9-bit)");
+            ImGui::TreePush        ("###ReducedQuality");
+            ImGui::BulletText      ("Banding will be visible to the naked eye");
+            ImGui::Spacing         ( );
+            ImGui::TreePop         ( );
+            ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (1.f, 1.f, 1.f, 1.f));
+            ImGui::TextUnformatted ("Visually Lossless");
+            ImGui::SameLine        ();
+            ImGui::SetCursorPos    (ImVec2 (x_pos, ImGui::GetCursorPosY ()));
+            ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (.75f, .75f, .75f, 1.f));
+            ImGui::TextUnformatted ("(10-bit - 12-bit)");
+            ImGui::TreePush        ("###VisuallyLossless");
+            ImGui::BulletText      ("Most image defects were there before encoding");
+            ImGui::Spacing         ( );
+            ImGui::TreePop         ( );
+            ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (1.f, 1.f, 1.f, 1.f));
+            ImGui::TextUnformatted ("Reference Quality");
+            ImGui::SameLine        ();
+            ImGui::SetCursorPos    (ImVec2 (x_pos, ImGui::GetCursorPosY ()));
+            ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (.75f, .75f, .75f, 1.f));
+            ImGui::TextUnformatted ("(16-bit scRGB, 10-bit HDR10)");
+            ImGui::TreePush        ("###ReferenceQuality");
+            ImGui::BulletText      ("Only benefits image analysis tools like SKIV");
+            ImGui::Spacing         ( );
+            ImGui::TreePop         ( );
+            ImGui::PopStyleColor   (6);
+            ImGui::EndTooltip      ( );
+          }
         }
 
         if (config.screenshots.png_compress)
@@ -4052,12 +4075,11 @@ SK_ImGui_ControlPanel (void)
               config.utility.save_async ();
             }
 
-            if (ImGui::IsItemHovered ())
+            if (ImGui::BeginItemTooltip ())
             {
-              ImGui::BeginTooltip ();
-              ImGui::BulletText   ("Windows 10 natively supports 10-bit and 12-bit AVIF images at 4:2:0, or 8-bit at up to 4:4:4");
-              ImGui::BulletText   ("Higher chroma subsampled AVIF images only render correctly in Windows 11 and Chrome/Edge");
-              ImGui::EndTooltip   ();
+              ImGui::BulletText ("Windows 10 natively supports 10-bit and 12-bit AVIF images at 4:2:0, or 8-bit at up to 4:4:4");
+              ImGui::BulletText ("Higher chroma subsampled AVIF images only render correctly in SKIV, Windows 11 24H2 and Chrome/Edge");
+              ImGui::EndTooltip ();
             }
 
             int scrgb_bits = ( config.screenshots.avif.scrgb_bit_depth == 8  ? 0 :
@@ -4098,9 +4120,8 @@ SK_ImGui_ControlPanel (void)
             changed |=
               ImGui::SliderInt ("Compression Speed",   &config.screenshots.avif.compression_speed,   0, 10);
 
-            if (ImGui::IsItemHovered ())
+            if (ImGui::BeginItemTooltip ())
             {
-              ImGui::BeginTooltip    ();
               ImGui::TextUnformatted ("How long to dedicate to compressing the image for smallest file size");
               ImGui::BulletText      ("Values < 7 are VERY slow, potentially taking minutes.");
               ImGui::BulletText      ("The compression is done on a background thread, unlikely to consume excessive CPU.");
@@ -4250,9 +4271,8 @@ SK_ImGui_ControlPanel (void)
             config.utility.save_async ();
           }
 
-          if (ImGui::IsItemHovered ())
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip ();
             ImGui::Text (
               "If SK's scRGB HDR mode is active, HDR is automatically enabled"
               " -- regardless what you set here" );
@@ -4394,13 +4414,12 @@ SK_ImGui_ControlPanel (void)
                 break;
               }
 
-              else if (ImGui::IsItemHovered ())
+              else if (ImGui::BeginItemTooltip ())
               {
                 static std::wstring title;
                                     title =
                 branch_details [it].release.title;
 
-                ImGui::BeginTooltip ();
                 ImGui::Text         ("%ws", title.c_str ());
                 //ImGui::Separator    ();
                 //ImGui::BulletText   ("Build: %li", branch_details [it].release.vinfo.build);
@@ -4572,9 +4591,8 @@ SK_ImGui_ControlPanel (void)
             );
           }
 
-          if (ImGui::IsItemHovered ())
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip ();
             ImGui::TextColored  (ImColor::HSV (.963f, .789f, .989f), "Patreon Benefits");
             ImGui::Separator    ();
             ImGui::BulletText   ("The names of mid-tier or higher patrons are permanently displayed in SKIF");
@@ -4714,9 +4732,8 @@ SK_ImGui_ControlPanel (void)
                               ).c_str (), ""
                           );
 
-          if (ImGui::IsItemHovered ())
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip ( );
             ImGui::Text         ( "%lu-Bit Injection History",
                                     SK_GetBitness () );
             ImGui::Separator    ( );
@@ -5397,9 +5414,8 @@ SK_ImGui_ControlPanel (void)
 
       ImGui::MenuItem (" G-Sync Status   ", szGSyncStatus, nullptr, true);
 
-      if (ImGui::IsItemHovered ())
+      if (ImGui::BeginItemTooltip ())
       {
-        ImGui::BeginTooltip    ();
         ImGui::TextColored     (ImVec4 (.4f, .8f, 1.f, 1.f), " " ICON_FA_MOUSE);
         ImGui::SameLine        ();
         ImGui::TextUnformatted ("Right-click to configure G-Sync / FastSync");
@@ -5458,9 +5474,8 @@ SK_ImGui_ControlPanel (void)
       ImGui::Text        ( " Current Resolution May Be Different Than The Game Expects!" );
       ImGui::EndGroup    ();
 
-      if (ImGui::IsItemHovered ())
+      if (ImGui::BeginItemTooltip ())
       {
-        ImGui::BeginTooltip ();
         ImGui::TextUnformatted (
           "A SwapChain Resize Failure Has Been Hidden From The Game To Prevent Crashing"
         );
@@ -5706,9 +5721,8 @@ SK_ImGui_ControlPanel (void)
                            "Frame Start\t (Frame Begin-to-Frame Begin)\0\0" );
           ImGui::PopItemWidth    ();
 
-          if (ImGui::IsItemHovered ())
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip    ();
             ImGui::TextUnformatted ("Timing Method Used to Measure the Interval Between Two Frames.");
             ImGui::Separator       ();
             ImGui::PushStyleColor  (ImGuiCol_Text, ImVec4 (1.f, 1.f, 1.f, 1.f));
@@ -5848,9 +5862,8 @@ SK_ImGui_ControlPanel (void)
 
         if (limit)
         {
-          if (ImGui::IsItemHovered ())
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip ();
             ImGui::TextUnformatted (
               "Graph color represents frame time variance, not proximity"
               " to your target FPS."
@@ -5878,12 +5891,11 @@ SK_ImGui_ControlPanel (void)
               config.render.framerate.target_fps_bg = __target_fps_bg;
             }
 
-            if (ImGui::IsItemHovered ())
+            if (ImGui::BeginItemTooltip ())
             {
               static bool unity =
                 rb.windows.unity;
 
-              ImGui::BeginTooltip ();
               ImGui::Text (
                 "Optional secondary limit applies when the game is running"
                 " in the background." );
@@ -5973,9 +5985,8 @@ SK_ImGui_ControlPanel (void)
           }
           ImGui::PopStyleColor ();
 
-          if (ImGui::IsItemHovered ( ))
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip    ( );
             ImGui::BeginGroup      ( );
             ImGui::TextColored     ( ImColor::HSV (0.18f, 0.88f, 0.94f),
                                        "  Ctrl Click" );
@@ -6517,9 +6528,8 @@ SK_ImGui_ControlPanel (void)
               _ResetLimiter ();
             }
 
-            if (ImGui::IsItemHovered ())
+            if (ImGui::BeginItemTooltip ())
             {
-              ImGui::BeginTooltip ();
               ImGui::Text         ("Latency Settings");
               ImGui::Separator    ();
               ImGui::BeginGroup   ();
@@ -6597,9 +6607,8 @@ SK_ImGui_ControlPanel (void)
               if (triggered)
                 ImGui::PopStyleColor (3);
 
-              if (ImGui::IsItemHovered ())
+              if (ImGui::BeginItemTooltip ())
               {
-                ImGui::BeginTooltip    ();
                 ImGui::TextUnformatted ("The Framerate Limiter Self-Optimizes When VRR is Detected");
                 ImGui::Separator       ();
                 ImGui::BulletText      ("Limit will be set lower than refresh to remove 1 frame of latency");
@@ -6746,13 +6755,12 @@ SK_ImGui_ControlPanel (void)
             SK_DWM_EnableMMCSS ((BOOL)config.render.framerate.enable_mmcss);
           }
 
-          if (ImGui::IsItemHovered ())
+          if (ImGui::BeginItemTooltip ())
           {
-            ImGui::BeginTooltip ();
-            ImGui::Text         ("Minimizes dropped frames when combined with FPS limiting.");
-            ImGui::Separator    ();
-            ImGui::BulletText   ("Keep this option enabled unless troubleshooting something");
-            ImGui::EndTooltip   ();
+            ImGui::Text       ("Minimizes dropped frames when combined with FPS limiting.");
+            ImGui::Separator  ();
+            ImGui::BulletText ("Keep this option enabled unless troubleshooting something");
+            ImGui::EndTooltip ();
           }
 #endif
 
@@ -6877,14 +6885,13 @@ SK_ImGui_ControlPanel (void)
   const bool open_widgets =
     ImGui::CollapsingHeader ("Widgets");
 
-  if (ImGui::IsItemHovered ( ))
+  if (ImGui::BeginItemTooltip ())
   {
-    ImGui::BeginTooltip ();
-    ImGui::Text         ("Advanced Graphical Extensions to the OSD");
-    ImGui::Separator    ();
-    ImGui::BulletText   ("Widgets are Graphical Representations of Performance Data");
-    ImGui::BulletText   ("Right-click a Widget to Access its Config Menu");
-    ImGui::EndTooltip   ();
+    ImGui::Text       ("Advanced Graphical Extensions to the OSD");
+    ImGui::Separator  ();
+    ImGui::BulletText ("Widgets are Graphical Representations of Performance Data");
+    ImGui::BulletText ("Right-click a Widget to Access its Config Menu");
+    ImGui::EndTooltip ();
   }
 
   if (open_widgets)
@@ -7541,33 +7548,39 @@ SK_ImGui_StageNextFrame (void)
   bool d3d12 = false;
   bool gl    = false;
 
-  switch (static_cast <int> (rb.api))
+  if (rb.api == SK_RenderAPI::OpenGL)
   {
-    case static_cast <int> (SK_RenderAPI::OpenGL):
-      gl = true;
-      ImGui_ImplGL3_NewFrame ();
-      break;
+    gl = true;
 
-    case static_cast <int> (SK_RenderAPI::D3D9):
-      d3d9 = true;
-      ImGui_ImplDX9_NewFrame ();
-      break;
-
-    case static_cast <int> (SK_RenderAPI::D3D11):
-      d3d11 = true;
-      ImGui_ImplDX11_NewFrame ();
-      break;
-
-    case static_cast <int> (SK_RenderAPI::D3D12):
-      d3d12 = true;
-      ImGui_ImplDX12_NewFrame ();
-      break;
-
-    default:
-      SK_LOG0 ( (L"No Render API"), L"Overlay" );
-      return;
+    ImGui_ImplGL3_NewFrame ();
   }
 
+  else if (static_cast <int> (rb.api) & static_cast <int> (SK_RenderAPI::D3D9))
+  {
+    d3d9 = true;
+
+    ImGui_ImplDX9_NewFrame ();
+  }
+
+  else if (static_cast <int> (rb.api) & static_cast <int> (SK_RenderAPI::D3D11))
+  {
+    d3d11 = true;
+
+    ImGui_ImplDX11_NewFrame ();
+  }
+
+  else if (static_cast <int> (rb.api) & static_cast <int> (SK_RenderAPI::D3D12))
+  {
+    d3d12 = true;
+
+    ImGui_ImplDX12_NewFrame ();
+  }
+
+  else
+  {
+    SK_LOG0 ( (L"No Render API"), L"Overlay" );
+    return;
+  }
   auto& io    = ImGui::GetIO    ();
   auto& style = ImGui::GetStyle ();
 
@@ -8077,7 +8090,8 @@ SK_ImGui_StageNextFrame (void)
 
   if (SK_ImGui_UnconfirmedDisplayChanges)
   {
-    SK_ImGui_ConfirmDisplaySettings (nullptr, "", {});
+    DEVMODEW                                      dev_mode = {};
+    SK_ImGui_ConfirmDisplaySettings (nullptr, "", dev_mode);
 
     if ( ImGui::BeginPopupModal ( "Confirm Display Setting Changes",
                                     nullptr,
@@ -8274,9 +8288,8 @@ SK_ImGui_StageNextFrame (void)
               config.input.keyboard.override_alt_f4 = false;
       }
 
-      if (ImGui::IsItemHovered ())
+      if (ImGui::BeginItemTooltip ())
       {
-        ImGui::BeginTooltip ();
         ImGui::Text         ("If disabled, game's default Alt + F4 behavior will apply");
 
         if (SK_ImGui_Visible)
@@ -8353,9 +8366,8 @@ SK_ImGui_StageNextFrame (void)
         config.display.force_fullscreen = false;
 
         _ClosePopup ();
-      } if (ImGui::IsItemHovered ())
+      } if (ImGui::BeginItemTooltip ())
         {
-          ImGui::BeginTooltip ();
           ImGui::Text         ("Safest Option");
           ImGui::Spacing      ();
           ImGui::SameLine     ();
@@ -8398,9 +8410,8 @@ SK_ImGui_StageNextFrame (void)
         config.render.framerate.flip_discard = false;
 
         _ClosePopup ();
-      } if (ImGui::IsItemHovered ())
+      } if (ImGui::BeginItemTooltip ())
         {
-          ImGui::BeginTooltip ();
           ImGui::Text         ("Not Recommended");
           ImGui::Spacing      ();
           ImGui::SameLine     ();
@@ -8873,11 +8884,11 @@ SK_ImGui_Toggle (void)
     SK_CreateEvent (nullptr, FALSE, FALSE, nullptr)
   );
 
-  static POINT ptCursorPos = { };
-
   SK_RunOnce (
     SK_Thread_CreateEx ([](LPVOID) -> DWORD
     {
+      SK_Thread_SetCurrentPriority (THREAD_PRIORITY_IDLE);
+
       HANDLE hEvents [] = {
         __SK_DLL_TeardownEvent,
         hMoveCursor.m_h
@@ -8899,7 +8910,7 @@ SK_ImGui_Toggle (void)
             SK_GetFramesDrawn ();
 
           while (frames_drawn > SK_GetFramesDrawn () - 2)
-            SK_Sleep (0);
+            SwitchToThread ();
 
           POINT                 ptCursor;
           if (SK_GetCursorPos (&ptCursor) && SK_GetForegroundWindow () == game_window.hWnd)
@@ -8915,9 +8926,7 @@ SK_ImGui_Toggle (void)
                 SK_GetFramesDrawn ();
 
               while (frames_drawn > SK_GetFramesDrawn () - 2)
-              {
-                SK_Sleep (0);
-              }
+                SwitchToThread ();
 
               SK_GetCursorPos   (&ptCursor);
               SK_SetCursorPos   ( ptCursor.x - 1, ptCursor.y + 1);

@@ -245,18 +245,18 @@ SK_HDR_ConvertImageToPNG (const DirectX::Image& raw_hdr_img, DirectX::ScratchIma
 
       pq_range_out = pq_range_16bpc;
 
-      const auto pq_range_in  =
+      const auto pq_range_in =
         (typeless_fmt == DXGI_FORMAT_R10G10B10A2_TYPELESS)  ? pq_range_10bpc :
         (typeless_fmt == DXGI_FORMAT_R16G16B16A16_TYPELESS) ? pq_range_16bpc :
                                                               pq_range_32bpc;
 
-      int intermediate_bits = 16;
-      int output_bits       = 
-        (typeless_fmt == DXGI_FORMAT_R10G10B10A2_TYPELESS)  ? 10 :
-        (typeless_fmt == DXGI_FORMAT_R16G16B16A16_TYPELESS) ? 12 :
-                                                              12;//16;
+      const int output_bits  = 
+        (typeless_fmt == DXGI_FORMAT_R10G10B10A2_TYPELESS)  ? std::min (10, config.screenshots.max_st2084_bits) :
+        (typeless_fmt == DXGI_FORMAT_R16G16B16A16_TYPELESS) ? std::min (16, config.screenshots.max_st2084_bits)
+                                                            : 12; // ... what?
 
-      output_bits = 16;
+      const int scrgb_postscale = 1UL << output_bits;
+      const float scrgb_prescale = static_cast<float>(scrgb_postscale);
 
       for (size_t j = 0; j < width; ++j)
       {
@@ -271,18 +271,23 @@ SK_HDR_ConvertImageToPNG (const DirectX::Image& raw_hdr_img, DirectX::ScratchIma
             LinearToPQ (XMVectorMax (XMVector3Transform (v, c_from709to2020), g_XMZero));
         }
 
-        v = // Quantize to 10- or 12-bpc before expanding to 16-bpc in order to improve
-          XMVectorRound ( // compression efficiency
-            XMVectorMultiply (
-              XMVectorSaturate (v), pq_range_out));
+        v = XMVectorSaturate (v);
 
-        *(rgb16_pixels++) =
-          static_cast <uint16_t> (DirectX::XMVectorGetX (v)) << (intermediate_bits - output_bits);
-        *(rgb16_pixels++) =
-          static_cast <uint16_t> (DirectX::XMVectorGetY (v)) << (intermediate_bits - output_bits);
-        *(rgb16_pixels++) =
-          static_cast <uint16_t> (DirectX::XMVectorGetZ (v)) << (intermediate_bits - output_bits);
-          rgb16_pixels++; // We have an unused alpha channel that needs skipping
+        if (output_bits != 16)
+        {
+          *(rgb16_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (std::roundf ((XMVectorGetX (v) * scrgb_prescale)) * 65536.0f) / scrgb_postscale));
+          *(rgb16_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (std::roundf ((XMVectorGetY (v) * scrgb_prescale)) * 65536.0f) / scrgb_postscale));
+          *(rgb16_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (std::roundf ((XMVectorGetZ (v) * scrgb_prescale)) * 65536.0f) / scrgb_postscale));
+            rgb16_pixels++; // We have an unused alpha channel that needs skipping
+        }
+
+        else
+        {
+          *(rgb16_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (XMVectorGetX (v) * 65536.0f)));
+          *(rgb16_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (XMVectorGetY (v) * 65536.0f)));
+          *(rgb16_pixels++) = static_cast <uint16_t> (std::min (65535, static_cast <int> (XMVectorGetZ (v) * 65536.0f)));
+            rgb16_pixels++; // We have an unused alpha channel that needs skipping
+        }
       }
     });
   }
@@ -353,20 +358,27 @@ SK_PNG_CopyToClipboard (const DirectX::Image& image, const void *pData, size_t d
     wcscpy ((wchar_t*)&df [1], (const wchar_t *)pData);
 
     bool clipboard_open = false;
-    for (UINT i = 0 ; i < 5 ; ++i)
-    {
-      clipboard_open = OpenClipboard (game_window.hWnd);
 
-      if (! clipboard_open)
-        SK_Sleep (2);
+    for (auto attempts = 0; attempts < 8; ++attempts)
+    {
+      if (attempts > 0)
+      {
+        SK_Sleep (1 << (attempts - 1));
+      }
+
+      if (OpenClipboard (game_window.hWnd))
+      {
+        clipboard_open = true;
+        break;
+      }
     }
 
     if (clipboard_open)
     {
       EmptyClipboard   ();
       SetClipboardData (CF_HDROP, hdrop);
-      GlobalUnlock               (hdrop);
       CloseClipboard   ();
+      GlobalUnlock     (          hdrop);
 
       return true;
     }
@@ -430,7 +442,7 @@ SK_ScreenshotManager::copyToClipboard ( const DirectX::Image& image,
       }
     }
   }
- 
+
   auto snip = 
     getSnipRect ();
 
@@ -517,12 +529,19 @@ SK_ScreenshotManager::copyToClipboard ( const DirectX::Image& image,
     SelectObject     (hdcDst, hbmpDst);
 
     bool clipboard_open = false;
-    for (UINT i = 0 ; i < 5 ; ++i)
-    {
-      clipboard_open = OpenClipboard (game_window.hWnd);
 
-      if (! clipboard_open)
-        SK_Sleep (2);
+    for (auto attempts = 0; attempts < 8; ++attempts)
+    {
+      if (attempts > 0)
+      {
+        SK_Sleep (1 << (attempts - 1));
+      }
+
+      if (OpenClipboard (game_window.hWnd))
+      {
+        clipboard_open = true;
+        break;
+      }
     }
 
     if (clipboard_open)
@@ -1195,7 +1214,7 @@ SK_Screenshot_SaveJXL (DirectX::ScratchImage &src_image, const wchar_t *wszFileP
 
     const DirectX::Image& image =
       *src_image.GetImages ();
-    
+
     if ( JXL_ENC_SUCCESS !=
            jxlEncoderSetParallelRunner ( jxl_encoder,
                                            jxlThreadParallelRunner,
@@ -1551,7 +1570,7 @@ png_crc32 (const void* typeless_data, size_t offset, size_t len, uint32_t crc)
       png_crc_table [(c ^ data [k]) & 255] ^
                     ((c >> 8)       & 0xFFFFFF);
   }
-  
+
   return
     (c ^ 0xffffffff);
 }
@@ -1593,7 +1612,7 @@ struct SK_PNG_HDR_cHRM_Payload
   SK_PNG_DeclareUint32 (green_x, 17000);
   SK_PNG_DeclareUint32 (green_y, 79700);
   SK_PNG_DeclareUint32 (blue_x,  13100);
-  SK_PNG_DeclareUint32 (blue_y,  04600);
+  SK_PNG_DeclareUint32 (blue_y,   4600);
 };
 
 struct SK_PNG_HDR_sBIT_Payload
@@ -2120,10 +2139,11 @@ SK_PNG_MakeHDR ( const wchar_t*        wszFilePath,
         static_cast <unsigned char> (DirectX::BitsPerColor (raw_img.format))
       };
 
-      // If using compression optimization, max bits = 12
-      sbit_data.red_bits   = 16;//std::min (sbit_data.red_bits,   12ui8);
-      sbit_data.green_bits = 16;//std::min (sbit_data.green_bits, 12ui8);
-      sbit_data.blue_bits  = 16;//std::min (sbit_data.blue_bits,  12ui8);
+      // Bits in the original image is not necessarily the number of bits used
+      //   for compression...
+      sbit_data.red_bits   = std::min ((uint8_t)config.screenshots.max_st2084_bits, sbit_data.red_bits);
+      sbit_data.green_bits = std::min ((uint8_t)config.screenshots.max_st2084_bits, sbit_data.green_bits);
+      sbit_data.blue_bits  = std::min ((uint8_t)config.screenshots.max_st2084_bits, sbit_data.blue_bits);
 
       auto& rb =
         SK_GetCurrentRenderBackend ();
@@ -2172,15 +2192,7 @@ SK_PNG_MakeHDR ( const wchar_t*        wszFilePath,
 
       // Write the remainder of the original file
       fwrite (insert_ptr, size - insert_pos, 1, fPNG);
-
-      auto final_size =
-        ftell (fPNG);
-
-      auto full_png =
-        std::make_unique <unsigned char []> (final_size);
-
-      rewind (fPNG);
-      fread  (full_png.get (), final_size, 1, fPNG);
+      fflush (fPNG);
       fclose (fPNG);
 
       SK_LOGi1 (L"Applied HDR10 PNG chunks to %ws.", wszFilePath);
@@ -2267,7 +2279,7 @@ SK_Image_InitializeTonemap ( std::vector <parallel_tonemap_job_s>& jobs,
         CreateEvent (nullptr, FALSE, FALSE, nullptr);
       parallel_start [i] =
         CreateEvent (nullptr, FALSE, FALSE, nullptr);
-  
+
       jobs [i].hCompletionEvent = parallel_finish [i];
       jobs [i].hStartEvent      = parallel_start  [i];
       jobs [i].job_id           =                  i;
@@ -2301,7 +2313,7 @@ SK_Image_DispatchTonemapJobs (std::vector <parallel_tonemap_job_s>& jobs)
           {
             float a = (  Ld / pow (Lc, 2.0f));
             float b = (1.0f / Ld);
-          
+
             return
               L * (1 + a * L) / (1 + b * L);
           };
@@ -2363,7 +2375,7 @@ SK_Image_DispatchTonemapJobs (std::vector <parallel_tonemap_job_s>& jobs)
       }, nullptr, &job );
     }
   }
-  
+
   for ( auto& job : jobs )
     SetEvent (job.hStartEvent);
 }
@@ -2379,12 +2391,12 @@ SK_Image_EnqueueTonemapTask ( DirectX::ScratchImage&                image,
   {
     size_t iStartRow = (image.GetMetadata ().height / config.screenshots.avif.max_threads) * i;
     size_t iEndRow   = (image.GetMetadata ().height / config.screenshots.avif.max_threads) * (i + 1);
-    
+
     jobs [i].pFirstPixel =
       &pixels [iStartRow * image.GetMetadata ().width];
     jobs [i].pLastPixel  =
       &pixels [iEndRow   * image.GetMetadata ().width - 1];
-    
+
     jobs [i].maxYInPQ    = maxLuminance;
     jobs [i].SDR_YInPQ   = sdrLuminance;
   }
@@ -2618,7 +2630,7 @@ bool isUHDREncoderAvailable (void)
       sk_uhdr_enc_set_preset                = (uhdr_enc_set_preset_pfn)               GetProcAddress (hModUHDR, "uhdr_enc_set_preset");
 
       sk_is_uhdr_image                      = (is_uhdr_image_pfn)                     GetProcAddress (hModUHDR, "is_uhdr_image");
-      
+
       sk_uhdr_create_decoder                = (uhdr_create_decoder_pfn)               GetProcAddress (hModUHDR, "uhdr_create_decoder");
       sk_uhdr_release_decoder               = (uhdr_release_decoder_pfn)              GetProcAddress (hModUHDR, "uhdr_release_decoder");
       sk_uhdr_dec_set_image                 = (uhdr_dec_set_image_pfn)                GetProcAddress (hModUHDR, "uhdr_dec_set_image");
@@ -2693,7 +2705,7 @@ SK_Screenshot_SaveUHDR (const DirectX::Image& image, const DirectX::Image& sdr_i
   {
     pHDR10_Image = &image;
   }
-  
+
   raw_hdr.planes [UHDR_PLANE_PACKED] =                             pHDR10_Image->pixels;
   raw_hdr.stride [UHDR_PLANE_PACKED] = static_cast <unsigned int> (pHDR10_Image->rowPitch / sizeof (uint32_t));
 
@@ -2746,7 +2758,7 @@ SK_Screenshot_SaveUHDR (const DirectX::Image& image, const DirectX::Image& sdr_i
     SK_LOGi0 (L"uhdr_enc_set_preset (...) failed: %d (%hs)", err.error_code, err.detail);
 
   err = sk_uhdr_encode (encoder);
- 
+
   if (err.error_code != UHDR_CODEC_OK)
     SK_LOGi0 (L"uhdr_encode (...) failed: %d (%hs)", err.error_code, err.detail);
 

@@ -947,7 +947,7 @@ SK_D3D11_DumpTexture2D ( _In_ ID3D11Texture2D* pTex, uint32_t crc32c )
            SK_UTF8ToWideChar (SK_D3D11_GetDebugNameA (pTex)) :
                               SK_D3D11_GetDebugNameW (pTex);
 
-        if (wcslen (wszSubDir.c_str ()))
+        if (wszSubDir.length ())
         {
           PathAppendW (wszPath, wszSubDir.c_str ());
           lstrcatW    (wszPath, L"/");
@@ -2504,8 +2504,11 @@ SK_D3D11_TextureIsCachedEx (ID3D11Texture2D* pTex, bool touch = false)
     bool use_l3 =
       config.textures.d3d11.use_l3_hash;
 
-    if (( use_l3 && textures->HashMap_Fmt [tex_desc.Format].map [tex_desc.MipLevels].contains (pTex)) ||
-        (!use_l3 &&                        textures->HashMap_2D [tex_desc.MipLevels].contains (pTex)))
+    if (( use_l3 && (size_t)tex_desc.Format    < textures->HashMap_Fmt.size () &&
+                            tex_desc.MipLevels < textures->HashMap_Fmt [tex_desc.Format].map.size () &&
+                                                 textures->HashMap_Fmt [tex_desc.Format].map [tex_desc.MipLevels].contains (pTex)) ||
+        (!use_l3 &&         tex_desc.MipLevels < textures->HashMap_2D.size ()  &&
+                                                 textures->HashMap_2D [tex_desc.MipLevels].contains (pTex)))
     {
       if (touch && (! SK_D3D11_IsTexInjectThread ()))
       {

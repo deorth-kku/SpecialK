@@ -120,9 +120,9 @@ NVSDK_NGX_Parameter_SetF_Detour (NVSDK_NGX_Parameter* InParameter, const char* I
         SK_GetCurrentRenderBackend ();
 
       const double dFrameTimeDeltaInMsec =
-        1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
-                   static_cast <double> (SK_QpcFreq) ) * SK_NGX_IsUsingDLSS_G () ? 2.0
-                                                                                 : 1.0;
+        ( 1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
+                     static_cast <double> (SK_QpcFreq) ) * SK_NGX_IsUsingDLSS_G () ) ? 2.0
+                                                                                     : 1.0;
 
       NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, dFrameTimeDeltaInMsec);
     }
@@ -180,9 +180,9 @@ NVSDK_NGX_Parameter_SetD_Detour (NVSDK_NGX_Parameter* InParameter, const char* I
         SK_GetCurrentRenderBackend ();
 
       const double dFrameTimeDeltaInMsec =
-        1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
-                   static_cast <double> (SK_QpcFreq) ) * SK_NGX_IsUsingDLSS_G () ? 2.0
-                                                                                 : 1.0;
+        ( 1000.0 * ( static_cast <double> (rb.frame_delta.getDeltaTime ()) /
+                     static_cast <double> (SK_QpcFreq) ) * SK_NGX_IsUsingDLSS_G () ) ? 2.0
+                                                                                     : 1.0;
 
       NVSDK_NGX_Parameter_SetD_Original (InParameter, InName, dFrameTimeDeltaInMsec);
 
@@ -318,6 +318,19 @@ NVSDK_NGX_Parameter_SetI_Detour (NVSDK_NGX_Parameter* InParameter, const char* I
     {
       InValue = config.nvidia.dlss.forced_preset;
     }
+
+    if (! SK_DLSS_Context::dlss_s::hasPresetsAThroughD ())
+    {
+      if (InValue >  NVSDK_NGX_DLSS_Hint_Render_Preset_Default &&
+          InValue <= NVSDK_NGX_DLSS_Hint_Render_Preset_D)
+      {
+        SK_RunOnce (
+          SK_LOGi0 (L"Replacing Non-Existent DLSS 3.8.10+ Preset With E")
+        );
+
+        InValue = NVSDK_NGX_DLSS_Hint_Render_Preset_E;
+      }
+    }
   }
 
   NVSDK_NGX_Parameter_SetI_Original (InParameter, InName, InValue);
@@ -364,6 +377,19 @@ NVSDK_NGX_Parameter_SetUI_Detour (NVSDK_NGX_Parameter* InParameter, const char* 
     {
       InValue = config.nvidia.dlss.forced_preset;
     }
+
+    if (! SK_DLSS_Context::dlss_s::hasPresetsAThroughD ())
+    {
+      if (InValue >  NVSDK_NGX_DLSS_Hint_Render_Preset_Default &&
+          InValue <= NVSDK_NGX_DLSS_Hint_Render_Preset_D)
+      {
+        SK_RunOnce (
+          SK_LOGi0 (L"Replacing Non-Existent DLSS 3.8.10+ Preset With E")
+        );
+
+        InValue = NVSDK_NGX_DLSS_Hint_Render_Preset_E;
+      }
+    }
   }
 
   NVSDK_NGX_Parameter_SetUI_Original (InParameter, InName, InValue);
@@ -409,6 +435,19 @@ NVSDK_NGX_Parameter_SetULL_Detour (NVSDK_NGX_Parameter* InParameter, const char*
     else if (config.nvidia.dlss.forced_preset != -1)
     {
       InValue = config.nvidia.dlss.forced_preset;
+    }
+
+    if (! SK_DLSS_Context::dlss_s::hasPresetsAThroughD ())
+    {
+      if (InValue >  NVSDK_NGX_DLSS_Hint_Render_Preset_Default &&
+          InValue <= NVSDK_NGX_DLSS_Hint_Render_Preset_D)
+      {
+        SK_RunOnce (
+          SK_LOGi0 (L"Replacing Non-Existent DLSS 3.8.10+ Preset With E")
+        );
+
+        InValue = NVSDK_NGX_DLSS_Hint_Render_Preset_E;
+      }
     }
   }
 
@@ -604,7 +643,7 @@ NVSDK_NGX_Parameter_GetULL_Detour (const NVSDK_NGX_Parameter *InParameter, const
   auto ret =
     NVSDK_NGX_Parameter_GetULL_Original (InParameter, InName, OutValue);
 
-  return ret;
+  //return ret;
 
   if (ret == NVSDK_NGX_Result_Success)
   {
@@ -1205,7 +1244,6 @@ SK_NGX_DLSS_GetCurrentPresetStr (void)
     case NVSDK_NGX_DLSS_Hint_Render_Preset_F:       return "F";            break;
     case NVSDK_NGX_DLSS_Hint_Render_Preset_G:       return "G";            break;
     default:                                        return "DLSS Default"; break;
-      break;
   }
 }
 

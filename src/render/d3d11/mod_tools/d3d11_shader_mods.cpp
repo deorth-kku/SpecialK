@@ -780,7 +780,7 @@ SK_D3D11_ShaderModDlg (SK_TLS* pTLS = SK_TLS_Bottom ())
               {
                 if (render_lifetime.count     (it) == 0)
                 {   render_textures.push_back (it);
-                    render_lifetime.insert    (
+                    render_lifetime.emplace   (
                                std::make_pair (it,
                                     lifetime { frames_drawn, 1 })
                     );
@@ -925,10 +925,6 @@ SK_D3D11_ShaderModDlg (SK_TLS* pTLS = SK_TLS_Bottom ())
           if (it == nullptr)
             continue;
 
-          char     szDebugDesc [128] = { };
-          wchar_t wszDebugDesc [128] = { };
-          UINT     uiDebugLen        = 127;
-
           bool named = false;
 
           UINT rtv_idx = 0;
@@ -941,6 +937,10 @@ SK_D3D11_ShaderModDlg (SK_TLS* pTLS = SK_TLS_Bottom ())
                          L"  D3D 11  " );
               continue;
             }
+
+            char     szDebugDesc [128] = { };
+            wchar_t wszDebugDesc [128] = { };
+            UINT     uiDebugLen        = 127;
 
             rtv_idx =
               rt_indexes [it];

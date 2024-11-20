@@ -483,6 +483,15 @@ SK_BootDXGI (void)
 void
 SK_BootOpenGL (void)
 {
+  // Unity games tend to load OpenGL, but not use it...
+  //   to avoid problems with AMD's driver beginning
+  //     interop-related stuff immediately; disable OpenGL.
+  if (SK_GetModuleHandleW (L"GameAssembly.dll") ||
+      SK_GetModuleHandleW (L"UnityPlayer.dll"))
+  {
+    return;
+  }
+
   if (SK_GetCurrentGameID () == SK_GAME_ID::yuzu)
   {
     static bool          once = false;
@@ -841,13 +850,18 @@ SK_RenderBackend_V2::gsync_s::update (bool force)
           auto& display =
             rb.displays [rb.active_display];
 
-          NV_GET_VRR_INFO vrr_info            = {       NV_GET_VRR_INFO_VER };
+          static NV_GET_VRR_INFO
+                        vrr_info              = {       NV_GET_VRR_INFO_VER };
           display.nvapi.monitor_caps.version  = NV_MONITOR_CAPABILITIES_VER;
           display.nvapi.monitor_caps.infoType = NV_MONITOR_CAPS_TYPE_GENERIC;
 
-          SK_NvAPI_Disp_GetVRRInfo             (display.nvapi.display_id, &vrr_info);
-          SK_NvAPI_DISP_GetMonitorCapabilities (display.nvapi.display_id,
-                                               &display.nvapi.monitor_caps);
+          static DWORD
+              dwLastCacheTime = 0;
+          if (dwLastCacheTime < SK::ControlPanel::current_time - 250UL)
+          {   dwLastCacheTime = SK::ControlPanel::current_time + 50UL;                    vrr_info = {NV_GET_VRR_INFO_VER};
+            SK_NvAPI_Disp_GetVRRInfo             (display.nvapi.display_id, &vrr_info);
+          } SK_NvAPI_DISP_GetMonitorCapabilities (display.nvapi.display_id,
+                                                 &display.nvapi.monitor_caps);
 
           display.nvapi.vrr_enabled =
             vrr_info.bIsVRREnabled;
@@ -2593,55 +2607,46 @@ DXGIColorSpaceToStr (DXGI_COLOR_SPACE_TYPE space) noexcept;
 
 #define UNKNOWN_DESCRIPTOR           (uint8_t)1
 #define DETAILED_TIMING_BLOCK        (uint8_t)2
-#define DESCRIPTOR_DATA                       5
+#define DISPLAY_DESCRIPTOR_HEADER_SIZE        5
+#define DISPLAY_DESCRIPTOR_DATA_SIZE         18
 
 #define DETAILED_TIMING_DESCRIPTIONS_START 0x36
 #define DETAILED_TIMING_DESCRIPTION_SIZE     18
 #define NUM_DETAILED_TIMING_DESCRIPTIONS      4
 
-static constexpr uint8_t MONITOR_NAME    = 0xfc;
+#define DISPLAY_DESCRIPTOR_PRODUCT_NAME       0xFC
+#define DISPLAY_DESCRIPTOR_PRODUCT_NAME_TRUNC 0xA
 
-static uint8_t
-blockType (uint8_t* block) noexcept
+inline uint8_t blockType (uint8_t* block) noexcept
 {
-  if (  block [0] == 0 &&
-        block [1] == 0 &&
-        block [2] == 0 &&
-        block [3] != 0 &&
-        block [4] == 0    )
+  if (block     != 0 &&
+      block [0] == 0 &&
+      block [1] == 0 &&
+      block [2] == 0 &&
+      block [3] != 0 &&
+      block [4] == 0)
   {
-    if (block [3] >= (uint8_t) 0xFA)
-    {
-      return
-        block [3];
-    }
+    return
+      block [3];
   }
 
   return
     UNKNOWN_DESCRIPTOR;
 }
 
-static std::string
+std::string
 SK_EDID_GetMonitorNameFromBlock ( uint8_t const* block )
 {
-  char     name [13] = { };
-  unsigned i;
+  char name [14] = { };
+  auto i         =  0;
+  auto ptr       =
+    (block + DISPLAY_DESCRIPTOR_HEADER_SIZE);
 
-  uint8_t const* ptr =
-    block + DESCRIPTOR_DATA;
-
-  for (i = 0; i < 13; ++i, ++ptr)
-  {
-    if (*ptr == 0xa)
-    {
-      name [i] = '\0';
-
-      return
-        name;
-    }
-
-    name [i] = *ptr;
-  }
+  do {
+    name [i++] =
+      (*ptr != DISPLAY_DESCRIPTOR_PRODUCT_NAME_TRUNC)
+      ?*ptr++ : '\0';
+  } while (i < 13);
 
   return name;
 }
@@ -2656,13 +2661,13 @@ SK_RenderBackend_V2::decodeEDIDForName (uint8_t *edid, size_t length) const
 
   unsigned int i        = 0;
   uint8_t*     block    = 0;
-  uint8_t      checksum = 0;
+  uint32_t     checksum = 0;
 
   for (i = 0; i < length; ++i)
     checksum += edid [i];
 
   // Bad checksum, fail EDID
-  if (checksum != 0)
+  if ((checksum % 256) != 0)
   {
     if (config.system.log_level > 0)
     {
@@ -2709,11 +2714,7 @@ SK_RenderBackend_V2::decodeEDIDForName (uint8_t *edid, size_t length) const
         block += DETAILED_TIMING_DESCRIPTION_SIZE;
         break;
 
-      case UNKNOWN_DESCRIPTOR:
-        ++block;
-        break;
-
-      case MONITOR_NAME:
+      case DISPLAY_DESCRIPTOR_PRODUCT_NAME:
       {
         uint8_t vendorString [5] = { };
 
@@ -2728,7 +2729,7 @@ SK_RenderBackend_V2::decodeEDIDForName (uint8_t *edid, size_t length) const
         edid_name +=
           SK_EDID_GetMonitorNameFromBlock (block);
 
-        bool one_pt_4 =
+        const bool one_pt_4 =
           ((((unsigned) edid [10]) & 0xffU) == 4);
 
 #define EDID_LOG2(x) {                              \
@@ -2738,12 +2739,14 @@ SK_RenderBackend_V2::decodeEDIDForName (uint8_t *edid, size_t length) const
         EDID_LOG2 ( ( L"SK_EDID_Parse (...): [ Name: %hs ]",
                       edid_name.c_str () ) );
 
-      block += DETAILED_TIMING_DESCRIPTION_SIZE;
-    } break;
+        block += DISPLAY_DESCRIPTOR_DATA_SIZE;
+      } break;
 
-    default:
-      ++block;
-      break;
+      default:
+      case UNKNOWN_DESCRIPTOR:
+      {
+        ++block;
+      } break;
     }
   }
 

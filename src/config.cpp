@@ -266,7 +266,8 @@ SK_GetCurrentGameID (void)
           { L"ysx.exe",                                SK_GAME_ID::YsX                          },
           { L"MonsterHunterWilds.exe",                 SK_GAME_ID::MonsterHunterWilds           },
           { L"MonsterHunterWildsBeta.exe",             SK_GAME_ID::MonsterHunterWilds           },
-          { L"Dragon Age The Veilguard.exe",           SK_GAME_ID::DragonAgeTheVeilguard        }
+          { L"Dragon Age The Veilguard.exe",           SK_GAME_ID::DragonAgeTheVeilguard        },
+          { L"tomb123.exe",                            SK_GAME_ID::TombRaider123Remastered      }
         };
 
     first_check  = false;
@@ -392,7 +393,7 @@ SK_GetCurrentGameID (void)
                               &region [0],
                               &region [1]);
 
-          if ( matches == 2 && region [0] != region [0] + region [1] )
+          if ( matches == 2 && region [0] != (region [0] + region [1]) )
           {
             current_game =
               SK_GAME_ID::FinalFantasy7;
@@ -702,6 +703,7 @@ struct {
 
   struct {
     sk::ParameterBool*    store_hdr               = nullptr;
+    sk::ParameterInt*     st2084_bits             = nullptr;
   } png;
 
   struct {
@@ -1051,6 +1053,8 @@ struct {
     sk::ParameterBool*    hook_scepad             = nullptr;
     sk::ParameterBool*    hook_raw_input          = nullptr;
     sk::ParameterBool*    hook_windows_gaming     = nullptr;
+    sk::ParameterBool*    hook_winmm              = nullptr;
+    sk::ParameterBool*    allow_steam_winmm       = nullptr;
 
     struct {
       sk::ParameterInt*   ui_slot                 = nullptr;
@@ -1219,6 +1223,11 @@ bool hook_winmm_orig     = true;
 bool
 SK_LoadConfig (const std::wstring& name)
 {
+  if (SK_GetHostAppUtil ()->isBlacklisted ())
+  {
+    return false;
+  }
+
   ULARGE_INTEGER
     useable  = { }, // Amount the current user's quota allows
     capacity = { },
@@ -1350,6 +1359,11 @@ SK_CreateINIParameter ( const wchar_t *wszDescription,
 bool
 SK_LoadConfigEx (std::wstring name, bool create)
 {
+  if (SK_GetHostAppUtil ()->isBlacklisted ())
+  {
+    return false;
+  }
+
   try
   {
   if (name.empty ())
@@ -1615,6 +1629,7 @@ auto DeclKeybind =
     ConfigEntry (screenshots.avif.compression_speed,     L"Compression Speed: 0=Slowest (Smallest File), 10=Fastest",  osd_ini,         L"Screenshot.AVIF",       L"Speed"),
     ConfigEntry (screenshots.png.store_hdr,              L"Use HDR PNG file format for HDR screenshots",               osd_ini,         L"Screenshot.HDR",        L"StorePNG"),
     ConfigEntry (screenshots.allow_hdr_clipboard,        L"Use HDR for Windows Clipboard screenshots",                 osd_ini,         L"Screenshot.HDR",        L"AllowClipboardHDR"),
+    ConfigEntry (screenshots.png.st2084_bits,            L"Use n-bit Quantization to save Disk Space",                 osd_ini,         L"Screenshot.HDR",        L"MaxST2084QuantizedBits"),
     Keybind ( &config.render.keys.hud_toggle,            L"Toggle Game's HUD",                                         osd_ini,         L"Game.HUD"),
     Keybind ( &config.osd.keys.console_toggle,           L"Toggle SK's Command Console",                               osd_ini,         L"OSD.System"),
     Keybind ( &config.screenshots.game_hud_free_keybind, L"Take a screenshot without the HUD",                         osd_ini,         L"Screenshot.System"),
@@ -1675,6 +1690,8 @@ auto DeclKeybind =
     ConfigEntry (input.gamepad.hook_dinput8,             L"Install hooks for DirectInput 8",                           dll_ini,         L"Input.Gamepad",         L"EnableDirectInput8"),
     ConfigEntry (input.gamepad.hook_dinput7,             L"Install hooks for DirectInput 7",                           dll_ini,         L"Input.Gamepad",         L"EnableDirectInput7"),
     ConfigEntry (input.gamepad.hook_hid,                 L"Install hooks for HID",                                     dll_ini,         L"Input.Gamepad",         L"EnableHID"),
+    ConfigEntry (input.gamepad.hook_winmm,               L"Install hooks for joyGet* APIs",                            dll_ini,         L"Input.Gamepad",         L"HookWinMM"),
+    ConfigEntry (input.gamepad.allow_steam_winmm,        L"Use Steam-manipulated version of WinMM input",              dll_ini,         L"Input.Gamepad",         L"AllowSteamWinMM"),
     ConfigEntry (input.gamepad.disable_rumble,           L"Disable Rumble from ALL SOURCES (across all APIs)",         dll_ini,         L"Input.Gamepad",         L"DisableRumble"),
     ConfigEntry (input.gamepad.blocks_screensaver,       L"Gamepad activity will block screensaver activation",        dll_ini,         L"Input.Gamepad",         L"BlocksScreenSaver"),
     ConfigEntry (input.gamepad.bt_input_only,            L"Prevent Bluetooth Output (PlayStation DirectInput compat.)",dll_ini,         L"Input.Gamepad",         L"BluetoothInputOnly"),
@@ -2224,6 +2241,7 @@ auto DeclKeybind =
     dll_ini->import_file (custom_name.c_str ());
   }
 
+  sec = sections.cbegin ();
 
   SK_RunOnce (
     while (sec != sections.cend ())
@@ -2236,6 +2254,11 @@ auto DeclKeybind =
       {
         const wchar_t* wszNext =
           wcschr (sec->first.c_str (), L'.');
+
+        if (StrStrIW (SK_CharNextW (wszNext), L"ReShade"))
+        {
+          config.compatibility.init_sync_for_reshade = true;
+        }
 
         import_.name =
           wszNext != nullptr       ?
@@ -2320,6 +2343,8 @@ auto DeclKeybind =
       ++sec;
     }
   );
+
+  sec = sections.cbegin ();
 
   while (sec != sections.cend ())
   {
@@ -3074,77 +3099,6 @@ auto DeclKeybind =
           }
         }
 #endif
-
-        bool bSteam = false,
-             bEpic  = false;
-
-        void* hdr_const_addr =
-          (void *)((uintptr_t)SK_Debug_GetImageBaseAddr () + 0xD23938);
-
-        DWORD dwOrigProt           =           PAGE_EXECUTE_READ;
-        if (VirtualProtect (hdr_const_addr, 8, PAGE_EXECUTE_READWRITE, &dwOrigProt))
-        {
-          uint64_t                           test_val = 0xf50c180511fac5;
-          if (*(uint64_t *)hdr_const_addr != test_val)
-          {
-            hdr_const_addr = nullptr;
-
-            VirtualProtect (hdr_const_addr, 8, dwOrigProt, &dwOrigProt);
-          }
-
-          else
-          {
-            bEpic = true;
-          }
-        }
-
-        else
-          hdr_const_addr = nullptr;
-
-        if (hdr_const_addr == nullptr)
-        {
-          hdr_const_addr =
-            (void *)((uintptr_t)SK_Debug_GetImageBaseAddr () + 0xD2A598);
-
-          dwOrigProt              =              PAGE_EXECUTE_READ;
-          if (VirtualProtect (hdr_const_addr, 8, PAGE_EXECUTE_READWRITE, &dwOrigProt))
-          {
-            uint64_t                           test_val = 0xf6e0e80511fac5;
-            if (*(uint64_t *)hdr_const_addr != test_val)
-            {
-              hdr_const_addr = nullptr;
-
-              VirtualProtect (hdr_const_addr, 8, dwOrigProt, &dwOrigProt);
-            }
-
-            else
-            {
-              bSteam = true;
-            }
-          }
-
-          else
-            hdr_const_addr = nullptr;
-        }
-
-        if (hdr_const_addr != nullptr)
-        {
-          static const
-          uint8_t                         data [] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-          memcpy (        hdr_const_addr, data, 8);
-          VirtualProtect (hdr_const_addr, 8, dwOrigProt, &dwOrigProt);
-          
-          SK_ImGui_CreateNotification (
-            "HorizonForbiddenWest.HDR", SK_ImGui_Toast::Success,
-            bEpic ? "Successfully Applied HDR Max Luminance Fix -:- (Epic Version)"
-                  : "Successfully Applied HDR Max Luminance Fix -:- (Steam Version)",
-            "Fixed Horizon Forbidden West HDR (Patch Courtesy of Ersh)", 10000UL,
-            SK_ImGui_Toast::UseDuration |
-            SK_ImGui_Toast::ShowCaption |
-            SK_ImGui_Toast::ShowTitle   |
-            SK_ImGui_Toast::ShowOnce
-          );
-        }
       } break;
 
       case SK_GAME_ID::Yakuza0:
@@ -3734,23 +3688,32 @@ auto DeclKeybind =
         config.input.ui.capture_mouse               = true;
         break;
 
+      // Game requires special sRGB treatment.
+      case SK_GAME_ID::TombRaider123Remastered:
+        config.render.dxgi.srgb_behavior            = 0;
+        break;
+
       case SK_GAME_ID::Metaphor:
+        config.threads.enable_dynamic_spinlocks        = true;
         config.compatibility.init_on_separate_thread   = false;
+        config.priority.perf_cores_only                = true;
+        config.window.background_render                = true;
         config.window.fullscreen_no_saver              = true;
-        config.input.ui.capture_hidden                 = true;
         config.input.keyboard.override_alt_f4          = true; // Oh lord, kill that buggy exit confirmation
-        config.render.framerate.sleepless_render       = false;
-        config.render.framerate.sleepless_window       = false;
+        config.render.framerate.sleepless_render       = true;
+        config.render.framerate.sleepless_window       = true;
         config.input.gamepad.xinput.emulate            = true; // XInput-only
         config.render.hdr.remaster_8bpc_as_unorm       = true;
         config.render.hdr.remaster_subnative_as_unorm  = true;
         config.input.gamepad.dinput.block_enum_devices = true; // Avoid perf issues
-        config.textures.cache.allow_staging            = true;
+        config.textures.cache.allow_staging            = false;
         config.render.dxgi.deferred_isolation          = true; // Needed for correct texture caching on staging uploads
 
         config.render.d3d12.force_anisotropic          = true;
-        config.render.d3d12.max_anisotropy             =  6UL;
-        config.render.d3d12.force_lod_bias             =-0.001f;
+        config.render.d3d12.force_lod_bias             = 0.0f;
+
+        SK_D3D11_DeclHUDShader_Vtx (0x187097b5);
+        SK_D3D11_DeclHUDShader_Vtx (0x8973ba49);
 
         // Scheduling fixes still needed.
         config.compatibility.allow_dxdiagn             = true;
@@ -4608,6 +4571,8 @@ auto DeclKeybind =
   texture.d3d11.inject->load             (config.textures.d3d11.inject);
         texture.res_root->load           (config.textures.d3d11.res_root);
 
+  SK_RunOnce (config.textures.d3d11.orig_cache = config.textures.d3d11.cache);
+
   texture.d3d11.injection_keeps_format->
                                    load  (config.textures.d3d11.injection_keeps_fmt);
              texture.dump_on_load->load  (config.textures.d3d11.dump);
@@ -4631,9 +4596,13 @@ auto DeclKeybind =
 
   input.keyboard.catch_alt_f4->load      (config.input.keyboard.catch_alt_f4);
   input.keyboard.bypass_alt_f4->load     (config.input.keyboard.override_alt_f4);
-  input.keyboard.disabled_to_game->load  (config.input.keyboard.disabled_to_game);
+  input.keyboard.disabled_to_game->load  (config.input.keyboard.org_disabled_to_game);
+  config.input.keyboard.
+                    org_disabled_to_game= config.input.keyboard.org_disabled_to_game;
 
   input.mouse.disabled_to_game->load     (config.input.mouse.disabled_to_game);
+  config.input.mouse.
+                 org_disabled_to_game =   config.input.mouse.disabled_to_game;
 
   input.cursor.manage->load              (config.input.cursor.manage);
   input.cursor.keys_activate->load       (config.input.cursor.keys_activate);
@@ -4656,6 +4625,8 @@ auto DeclKeybind =
   input.gamepad.hook_scepad->load        (config.input.gamepad.hook_scepad);
 
   // Hidden INI values; they're loaded, but never written
+  input.gamepad.hook_winmm->load         (config.input.gamepad.hook_winmm);
+  input.gamepad.allow_steam_winmm->load  (config.input.gamepad.allow_steam_winmm);
   input.gamepad.hook_windows_gaming->load(config.input.gamepad.hook_windows_gaming);
   input.gamepad.hook_raw_input->load     (config.input.gamepad.hook_raw_input);
   input.gamepad.hook_dinput8->load       (config.input.gamepad.hook_dinput8);
@@ -5401,6 +5372,7 @@ auto DeclKeybind =
 
   screenshots.png.store_hdr->load             (config.screenshots.use_hdr_png);
   screenshots.allow_hdr_clipboard->load       (config.screenshots.allow_hdr_clipboard);
+  screenshots.png.st2084_bits->load           (config.screenshots.max_st2084_bits);
 
   LoadKeybind (&config.render.keys.hud_toggle);
   LoadKeybind (&config.osd.keys.console_toggle);
@@ -5941,8 +5913,10 @@ SK_SaveConfig ( std::wstring name,
                 bool         close_config )
 {
   // Ignore this :)
-  if (SK_GetCurrentGameID () == SK_GAME_ID::Launcher)
+  if (SK_GetCurrentGameID () == SK_GAME_ID::Launcher || SK_GetHostAppUtil ()->isBlacklisted ())
+  {
     return;
+  }
 
   if (name.empty ())
   {
@@ -6093,9 +6067,9 @@ SK_SaveConfig ( std::wstring name,
 
   input.keyboard.catch_alt_f4->store          (config.input.keyboard.catch_alt_f4);
   input.keyboard.bypass_alt_f4->store         (config.input.keyboard.override_alt_f4);
-  input.keyboard.disabled_to_game->store      (config.input.keyboard.disabled_to_game);
+  input.keyboard.disabled_to_game->store      (config.input.keyboard.org_disabled_to_game);
 
-  input.mouse.disabled_to_game->store         (config.input.mouse.disabled_to_game);
+  input.mouse.disabled_to_game->store         (config.input.mouse.org_disabled_to_game);
 
   input.cursor.manage->store                  (config.input.cursor.manage);
   input.cursor.keys_activate->store           (config.input.cursor.keys_activate);
@@ -6765,6 +6739,7 @@ SK_SaveConfig ( std::wstring name,
 
   screenshots.png.store_hdr->store             (config.screenshots.use_hdr_png);
   screenshots.allow_hdr_clipboard->store       (config.screenshots.allow_hdr_clipboard);
+  screenshots.png.st2084_bits->store           (config.screenshots.max_st2084_bits);
 
   screenshots.jxl.use_jxl->store               (config.screenshots.use_jxl);
   screenshots.avif.use_avif->store             (config.screenshots.use_avif);
@@ -6918,7 +6893,8 @@ SK_KeyMap_StandardizeNames (wchar_t* wszNameToFormalize)
 
   bool lower = true;
 
-  while (*pwszName != L'\0')
+  while ( pwszName != nullptr &&
+         *pwszName != L'\0' )
   {
     if (lower) CharLowerW (pwszName);
     else       CharUpperW (pwszName);
@@ -7222,23 +7198,28 @@ SK_AppCache_Manager::loadAppCacheForExe (const wchar_t* wszExe)
 
   if (wszPath != nullptr)
   {
-    std::wstring wszRelPath
-    (
+    auto wszRelStr =
       SK_CharNextW (
           StrStrIW (
       SK_CharNextW (
           StrStrIW ( wszPath, LR"(\)" )
-                   ),         LR"(\)"
-       )
-      )
-    ); wszRelPath += L'\0';
+                   ),         LR"(\)" )
+                   );
 
-    PathRemoveFileSpecW (
-      wszRelPath.data ()
-    );
+    std::wstring wszRelPath = L"";
 
-    //SK_LOG0 ( ( L" Relative Path: %ws ", wszRelPath.data () ),
-    //            L" AppCache " );
+    if (wszRelStr != nullptr)
+    {
+      wszRelPath = wszRelStr;
+      wszRelPath += L'\0';
+
+      PathRemoveFileSpecW (
+        wszRelPath.data ()
+      );
+
+      //SK_LOG0 ( ( L" Relative Path: %ws ", wszRelPath.data () ),
+      //            L" AppCache " );
+    }
 
     wchar_t            wszAppCache [MAX_PATH + 2] = { };
     std::wstring_view
@@ -7552,16 +7533,19 @@ SK_AppCache_Manager::addAppToCache ( const wchar_t* wszFullPath,
     wchar_t         wszAppID [32] = { };
     std::format_to (wszAppID, L"{:0}", uiAppID);
 
-    if (fwd_map.contains_key (wszRelPath))
-      fwd_map.get_value      (wszRelPath) = wszAppID;
-    else
-      fwd_map.add_key_value  (wszRelPath,   wszAppID);
+    if (wszRelPath != nullptr)
+    {
+      if (fwd_map.contains_key (wszRelPath))
+        fwd_map.get_value      (wszRelPath) = wszAppID;
+      else
+        fwd_map.add_key_value  (wszRelPath,   wszAppID);
 
 
-    if (rev_map.contains_key (wszAppID))
-      rev_map.get_value      (wszAppID) = wszRelPath;
-    else
-      rev_map.add_key_value  (wszAppID,   wszRelPath);
+      if (rev_map.contains_key (wszAppID))
+        rev_map.get_value      (wszAppID) = wszRelPath;
+      else
+        rev_map.add_key_value  (wszAppID,   wszRelPath);
+    }
 
 
     if (name_map.contains_key (wszAppID))

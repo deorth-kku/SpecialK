@@ -866,10 +866,10 @@ SK_D3D11_SetShaderResources_Impl (
        pDevContext, StartSlot, NumViews, ppShaderResourceViews);
   };
 
-  bool early_out =                      shader_base == nullptr ||
-    ( SK_D3D11_IgnoreWrappedOrDeferred (bWrapped, SK_D3D11_IsDevCtxDeferred (pDevContext),
-                                                  pDevContext) ||
-    (! bMustNotIgnore) );
+  bool early_out = (! bMustNotIgnore) || shader_base == nullptr ||
+    SK_D3D11_IgnoreWrappedOrDeferred (bWrapped,
+           SK_D3D11_IsDevCtxDeferred (pDevContext),
+                                      pDevContext) || cs_lock == nullptr;
 
   if (early_out)
   {
@@ -879,7 +879,6 @@ SK_D3D11_SetShaderResources_Impl (
 
   if (dev_idx == UINT_MAX)
       dev_idx  = SK_D3D11_GetDeviceContextHandle (pDevContext);
-
 
   auto& views =
     shader_base->current.views [dev_idx];
@@ -952,8 +951,9 @@ SK_D3D11_SetShaderResources_Impl (
     //   current shader matches the debug tracker
     if ( (active && shader_crc32c == tracked.crc32c) && cs_lock != nullptr)
     {
-      std::scoped_lock <SK_Thread_CriticalSection> auto_lock (*cs_lock);
-
+      std::lock                                             (*cs_lock,        *cs_render_view);
+      std::lock_guard <SK_Thread_HybridSpinlock> auto_lock1 (*cs_lock,        std::adopt_lock);
+      std::lock_guard <SK_Thread_HybridSpinlock> auto_lock2 (*cs_render_view, std::adopt_lock);
       for (UINT i = 0; i < NumViews; i++)
       {
         if (StartSlot + i >= D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT)
@@ -2503,7 +2503,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
     tracker = GetShaderTracker (shader_type);
 
   auto GetShaderSet =
-    [&](const sk_shader_class& type) ->
+    [&](const sk_shader_class type) ->
       std::set <uint32_t>&
       {
         static std::set <uint32_t> set  [6];
@@ -2646,7 +2646,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
     shader_set ( set.cbegin (), set.cend () );
 
   auto GetShaderDisasm =
-    [](const sk_shader_class& type) ->
+    [](const sk_shader_class type) ->
       std::unordered_map <uint32_t, shader_disasm_s>*
       {
         switch (type)
@@ -2665,7 +2665,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
     disassembly = GetShaderDisasm (shader_type);
 
   auto GetShaderWord =
-    [](const sk_shader_class& type) ->
+    [](const sk_shader_class type) ->
       const char*
       {
         switch (type)
@@ -2688,7 +2688,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
   const
    auto
     GetShaderChange =
-    [&](const sk_shader_class& type) ->
+    [&](const sk_shader_class type) ->
       uint32_t&
       {
         switch (type)
@@ -2704,7 +2704,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
       };
 
   auto GetShaderBlacklist =
-    [&](const sk_shader_class& type)->
+    [&](const sk_shader_class type)->
       std::unordered_map <uint32_t, LONG>&
       {
         static std::unordered_map <uint32_t, LONG> invalid;
@@ -2722,7 +2722,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
       };
 
   auto GetShaderBlacklistEx =
-    [&](const sk_shader_class& type)->
+    [&](const sk_shader_class type)->
       SK_D3D11_KnownShaders::conditional_blacklist_t&
       {
         static SK_D3D11_KnownShaders::conditional_blacklist_t invalid;
@@ -2740,7 +2740,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
       };
 
   auto GetShaderUsedResourceViews =
-    [&](const sk_shader_class& type)->
+    [&](const sk_shader_class type)->
       concurrency::concurrent_unordered_set <SK_ComPtr <ID3D11ShaderResourceView> >&
       {
         static concurrency::concurrent_unordered_set <SK_ComPtr <ID3D11ShaderResourceView>> invalid;
@@ -2758,7 +2758,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
       };
 
   auto GetShaderResourceSet =
-    [&](const sk_shader_class& type)->
+    [&](const sk_shader_class type)->
       concurrency::concurrent_unordered_set <SK_ComPtr <ID3D11ShaderResourceView> >&
       {
         static concurrency::concurrent_unordered_set <SK_ComPtr <ID3D11ShaderResourceView>> invalid;
@@ -2783,7 +2783,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
             bool hovering      = false;
             bool focused       = false;
 
-    static int ClassToIdx (const sk_shader_class& shader_class) noexcept
+    static int ClassToIdx (const sk_shader_class shader_class) noexcept
     {
       // nb: shader_class is a bitmask, we need indices
       switch (shader_class)
@@ -2800,7 +2800,7 @@ SK_LiveShaderClassView (sk_shader_class shader_type, bool& can_scroll)
       }
     }
 
-    static const wchar_t* ClassToPrefix (const sk_shader_class& shader_class) noexcept
+    static const wchar_t* ClassToPrefix (const sk_shader_class shader_class) noexcept
     {
       // nb: shader_class is a bitmask, we need indices
       switch (shader_class)

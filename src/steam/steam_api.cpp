@@ -1636,6 +1636,7 @@ SteamAPI_UnregisterCallback_Detour (class CCallbackBase *pCallback)
     case P2PSessionRequest_t::k_iCallback:
       steam_log->Log ( L" * (%-28s) Uninstalled Peer to Peer Session Request Callback",
                       caller.c_str () );
+      break;
     case GetAuthSessionTicketResponse_t::k_iCallback:
       steam_log->Log ( L" * (%-28s) Uninstalled Auth Session Ticket Response Callback",
                       caller.c_str () );
@@ -5421,7 +5422,7 @@ SK_Steam_PiratesAhoy (void)
 
   //   Older versions of SteamAPI may not support the necessary interface version
   if ( pUtils != nullptr && pApps != nullptr &&
-       validation_pass   != SK_Steam_FileSigPass_e::Done )
+       validation_pass   != SK_Steam_FileSigPass_e::Done && !SK_IsCurrentGame (SK_GAME_ID::Fallout4) )
   {
     DepotId_t depots [16] = { };
 

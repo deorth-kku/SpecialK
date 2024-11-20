@@ -592,6 +592,9 @@ SK_ImGui_WantHWCursor (void)
 bool
 SK_ImGui_WantMouseCapture (bool update)
 {
+  if (SK_ReShadeAddOn_IsOverlayActive ())
+    return false;
+
   static std::atomic_bool               capture  = false;
   static std::atomic <ULONG64> lastFrameCaptured = 0;
 
@@ -924,9 +927,6 @@ SK_GetCursorInfo (PCURSORINFO pci)
     if (     GetCursorInfo_Original != nullptr)
       return GetCursorInfo_Original (pci);
 
-    else if (GetCursorInfo_Original != nullptr)
-      return GetCursorInfo_Original (pci);
-
     return
       GetCursorInfo (pci);
   }
@@ -1063,7 +1063,7 @@ GetCursorPos_Detour (LPPOINT lpPoint)
     //
     // Compute delta mouse coordinates for games that use cursor warping (i.e. mouselook)
     //
-    if (SK_ImGui_WantMouseCapture () || s_GameSetCursorPosTime >= SK_timeGetTime () - kCursorWarpCooldown)
+    if (SK_ImGui_WantMouseCapture () || (SK_ImGui_Active () && s_GameSetCursorPosTime >= SK_timeGetTime () - kCursorWarpCooldown))
     {
       SK_Win32_Backend->markHidden (sk_win32_func::GetCursorPos);
 #if 0
@@ -1221,7 +1221,7 @@ SetCursorPos_Detour (_In_ int x, _In_ int y)
   if (config.window.drag_lock)
     return TRUE;
 
-  if (SK_ImGui_IsMouseRelevant ())
+  if (SK_ImGui_Active ())
   {
     // Game WANTED to change its position, so remember that.
     POINT                           pt { x, y };

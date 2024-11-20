@@ -1167,6 +1167,7 @@ DllThread (LPVOID user)
   SetThreadPriorityBoost      ( SK_GetCurrentThread (), TRUE                          );
 
   if (config.compatibility.init_on_separate_thread && (! config.compatibility.init_sync_for_streamline))
+                                                   //&& (! config.compatibility.init_sync_for_reshade))
   {
     auto* params =
       static_cast <init_params_s *> (user);
@@ -1685,7 +1686,7 @@ SK_EstablishRootPath (void)
     if (! bEnvironmentDefinedPath)
     {
       if ( CRegKey
-             hkInstallPath; (! bEnvironmentDefinedPath) && ERROR_SUCCESS ==
+             hkInstallPath; ERROR_SUCCESS ==
              hkInstallPath.Open ( HKEY_CURRENT_USER,
                   LR"(Software\Kaldaien\Special K)" )
           )
@@ -2199,7 +2200,9 @@ SK_StartupCore (const wchar_t* backend, void* callback)
 #ifndef _THREADED_BASIC_INIT
     BasicInit ();
 
-    if ((! config.compatibility.init_on_separate_thread) || config.compatibility.init_sync_for_streamline)
+    if ((! config.compatibility.init_on_separate_thread) ||
+           config.compatibility.init_sync_for_streamline)// ||
+           //config.compatibility.init_sync_for_reshade)
     {
       bool gl = false, vulkan = false, d3d9  = false, d3d11 = false, d3d12 = false,
          dxgi = false, d3d8   = false, ddraw = false, glide = false;
@@ -2277,12 +2280,14 @@ SK_StartupCore (const wchar_t* backend, void* callback)
         if (          file.is_regular_file (ec) &&
            !_wcsicmp (path.extension ().c_str (), L".asi"))
         {
+          const auto& path_filename = path.filename ();
+
           // It's already loaded...
-          if (GetModuleHandleW (path.filename ().c_str ()))
+          if (GetModuleHandleW (path_filename.c_str ()))
             continue;
 
-          const auto filename      = path.filename ().wstring  ();
-          const auto filename_utf8 = path.filename ().u8string ();
+          const auto filename      = path_filename.wstring  ();
+          const auto filename_utf8 = path_filename.u8string ();
 
           dll_log->LogEx (
             true, L"[ SpecialK ]  * Loading Early ASI PlugIn: '%ws' from '%ws' ... ",
@@ -3185,12 +3190,19 @@ SK_FrameCallback ( SK_RenderBackend& rb,
                    ULONG64           frames_drawn =
                                        SK_GetFramesDrawn () )
 {
+  void
+  ActivateWindow ( HWND hWnd,
+                   bool active          = false,
+                   HWND hWndDeactivated = 0 );
+
   switch (frames_drawn)
   {
     // First frame
     //
     case 0:
     {
+      ActivateWindow (game_window.hWnd, SK_GetForegroundWindow () == game_window.hWnd);
+
       // Notify anything that was waiting for injection into this game
       SK_Inject_BroadcastInjectionNotify ();
 
@@ -3263,6 +3275,8 @@ SK_FrameCallback ( SK_RenderBackend& rb,
     //
     default:
     {
+      ActivateWindow (game_window.hWnd, SK_GetForegroundWindow () == game_window.hWnd);
+
       if (game_window.active)
         SK_RunOnce (SK_Steam_ProcessWindowActivation (game_window.active));
 

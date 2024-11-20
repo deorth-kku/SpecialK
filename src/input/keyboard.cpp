@@ -166,21 +166,7 @@ SK_ImGui_ExemptOverlaysFromKeyboardCapture (void)
 bool
 SK_ImGui_WantKeyboardCapture (bool update)
 {
-  const auto framesDrawn =
-    SK_GetFramesDrawn ();
-
-  static std::atomic_bool               capture  = false;
-  static std::atomic <ULONG64> lastFrameCaptured = 0;
-
-  if (! update)
-    return capture.load () || lastFrameCaptured > framesDrawn - 2;
-
-  // Do not block on first frame drawn unless explicitly disabled
-  if (framesDrawn < 1 && (config.input.keyboard.disabled_to_game != 1))
-  {
-    capture.store (false);
-    return false;
-  }
+  static std::atomic_bool capture = false;
 
   if (! SK_GImDefaultContext ())
   {
@@ -191,8 +177,18 @@ SK_ImGui_WantKeyboardCapture (bool update)
   // Allow keyboard input while ReShade overlay is active
   if (SK_ReShadeAddOn_IsOverlayActive ())
   {
+    config.input.mouse   .disabled_to_game = 2;
+    config.input.keyboard.disabled_to_game = 2;
     capture.store (false);
-    return false;
+
+    return !SK_IsGameWindowActive ();
+  }
+  else
+  {
+    config.input.mouse.       disabled_to_game =
+    config.input.mouse.   org_disabled_to_game;
+    config.input.keyboard.    disabled_to_game =
+    config.input.keyboard.org_disabled_to_game;
   }
 
   // Allow keyboard input while Steam /EOS overlays are active
@@ -202,6 +198,21 @@ SK_ImGui_WantKeyboardCapture (bool update)
     capture.store (false);
     return false;
   }
+
+  const auto framesDrawn =
+    SK_GetFramesDrawn ();
+
+  // Do not block on first frame drawn unless explicitly disabled
+  if (framesDrawn < 1 && (config.input.keyboard.disabled_to_game != 1))
+  {
+    capture.store (false);
+    return false;
+  }
+
+  static std::atomic <ULONG64> lastFrameCaptured = 0;
+
+  if (! update)
+    return capture.load () || lastFrameCaptured > framesDrawn - 2;
 
   bool imgui_capture =
     config.input.keyboard.disabled_to_game == SK_InputEnablement::Disabled;
@@ -222,8 +233,10 @@ SK_ImGui_WantKeyboardCapture (bool update)
 
     else
     {
+      auto temp_poke_frame = ReadULong64Acquire (&config.input.keyboard.temporarily_allow);
+
       // Poke through input for a special-case
-      if (ReadULong64Acquire (&config.input.keyboard.temporarily_allow) > framesDrawn - 40)
+      if (temp_poke_frame > 0 && temp_poke_frame > framesDrawn - 40)
       {
         imgui_capture = false;
       }

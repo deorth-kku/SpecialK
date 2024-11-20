@@ -339,7 +339,7 @@ ImGui_DX12Startup ( IDXGISwapChain* pSwapChain )
   {
     DXGI_SWAP_CHAIN_DESC swap_desc = { };
 
-    if (pSwapChain != nullptr && SUCCEEDED (pSwapChain->GetDesc (&swap_desc)))
+    if (SUCCEEDED (pSwapChain->GetDesc (&swap_desc)))
     {
       if (swap_desc.OutputWindow != nullptr)
       {
@@ -411,7 +411,7 @@ ImGui_DX11Startup ( IDXGISwapChain* pSwapChain )
       {
         DXGI_SWAP_CHAIN_DESC swap_desc = { };
 
-        if (pSwapChain != nullptr && SUCCEEDED (pSwapChain->GetDesc (&swap_desc)))
+        if (SUCCEEDED (pSwapChain->GetDesc (&swap_desc)))
         {
           if (swap_desc.OutputWindow != nullptr)
           {
@@ -1672,7 +1672,10 @@ SK_D3D11_ClearSwapchainBackbuffer (IDXGISwapChain *pSwapChain, const float *pCol
 #endif
 
     // NOTE: This will exist even if the system does not support HDR
-    if (                            pRawRTV   != nullptr ||
+    if (
+#ifdef __SK_NO_FLIP_MODEL
+                                    pRawRTV   != nullptr ||
+#endif
          ( _d3d11_rbk->frames_.size () > 0               &&
            _d3d11_rbk->frames_ [0].hdr.pRTV.p != nullptr &&
            SK_D3D11_EnsureMatchingDevices (_d3d11_rbk->frames_ [0].hdr.pRTV, pDev.p) )
@@ -2446,6 +2449,11 @@ SK_DXGI_PresentBase ( IDXGISwapChain         *This,
                       UINT _Flags) ->
   HRESULT
   {
+    // Disable fractional VSYNC for the first 120 frames in order to
+    //   detect VRR support correctly.
+    if (_SyncInterval > 1 && SK_GetFramesDrawn () < 120)
+        _SyncInterval = 1;
+
     if ( config.render.framerate.target_fps_bg > 0.0f && 
          config.render.framerate.target_fps_bg < rb.getActiveRefreshRate () / 2.0f &&
          (! SK_IsGameWindowActive ()) )
@@ -4361,7 +4369,7 @@ HRESULT
 STDMETHODCALLTYPE
 DXGIOutput_WaitForVBlank_Override ( IDXGIOutput *This ) noexcept
 {
-  //DXGI_LOG_CALL_I0 (L"       IDXGIOutput", L"WaitForVBlank         ");
+  SK_LOG_FIRST_CALL
 
   return
     WaitForVBlank_Original (This);
@@ -4433,8 +4441,8 @@ DXGISwap3_ResizeBuffers1_Override (IDXGISwapChain3* This,
   //   a valid footgun license and can afford to lose a few toes.
   //
   if (                            SK_ComPtr <ID3D12Device> pSwapDev12;
-      FAILED (This->GetDevice (IID_ID3D12Device, (void **)&pSwapDev12.p) ||
-               config.render.dxgi.allow_d3d12_footguns)
+      FAILED (This->GetDevice (IID_ID3D12Device, (void **)&pSwapDev12.p)) ||
+               config.render.dxgi.allow_d3d12_footguns
      )
   {
     if (       config.render.framerate.buffer_count != SK_NoPreference &&
@@ -5486,7 +5494,7 @@ SK_DXGI_CreateSwapChain_PreInit (
 
   _ORIGINAL_SWAP_CHAIN_DESC = orig_desc;
 
-  if (memcmp (&orig_desc, pDesc, sizeof (DXGI_SWAP_CHAIN_DESC)) != 0)
+  if (pDesc != nullptr && memcmp (&orig_desc, pDesc, sizeof (DXGI_SWAP_CHAIN_DESC)) != 0)
   {
     _DescribeSwapChain (L"SPECIAL K OVERRIDES APPLIED");
   }
@@ -5982,6 +5990,21 @@ SK_DXGI_WrapSwapChain ( IUnknown        *pDevice,
                (uintptr_t)pSwapChain
     );
 
+    // Setup D3D11 Device Context Late (on successive draw)
+    if (rb.device.p == nullptr && SK_GetFramesDrawn () > 0)
+    {
+      if (rb.swapchain == nullptr)
+          rb.swapchain = pSwapChain;
+
+      SK_ComPtr <ID3D11DeviceContext> pDevCtx;
+      pDev11.p->GetImmediateContext (&pDevCtx.p);
+             rb.d3d11.immediate_ctx = pDevCtx;
+             rb.setDevice            (pDev11.p);
+
+      SK_LOGs0 ( L"  D3D 11  ",
+                 L"Active D3D11 Device Context Established on creation of new SwapChain" );
+    }
+
     // Stash the pointer to this device so that we can test equality on wrapped devices
     pDev11->SetPrivateData (SKID_D3D11DeviceBasePtr, sizeof (uintptr_t), pNativeDev11.p != nullptr ? pNativeDev11.p : pDev11.p);
   }
@@ -6093,6 +6116,21 @@ SK_DXGI_WrapSwapChain1 ( IUnknown         *pDevice,
 
     // Stash the pointer to this device so that we can test equality on wrapped devices
     pDev11->SetPrivateData (SKID_D3D11DeviceBasePtr, sizeof (uintptr_t), pDev11.p);
+
+    // Setup D3D11 Device Context Late (on successive draw)
+    if (rb.device.p == nullptr && SK_GetFramesDrawn () > 0)
+    {
+      if (rb.swapchain == nullptr)
+          rb.swapchain = pSwapChain;
+
+      SK_ComPtr <ID3D11DeviceContext> pDevCtx;
+      pDev11.p->GetImmediateContext (&pDevCtx.p);
+             rb.d3d11.immediate_ctx = pDevCtx;
+             rb.setDevice            (pDev11.p);
+
+      SK_LOGs0 ( L"  D3D 11  ",
+                 L"Active D3D11 Device Context Established on creation of new SwapChain" );
+    }
   }
 
   if (ret != nullptr)
@@ -7130,8 +7168,8 @@ _In_opt_       IDXGIOutput                     *pRestrictToOutput,
         // Don't cache SwapChains, NVIDIA always creates a new device
         if (! bNvInterop)
         {
-          SK_DXGI_MakeCachedSwapChainForHwnd
-               ( *ppSwapChain, hWnd, pDev11.p );
+          //SK_DXGI_MakeCachedSwapChainForHwnd
+          //     ( *ppSwapChain, hWnd, pDev11.p );
         }
       }
 
@@ -8093,9 +8131,6 @@ WINAPI CreateDXGIFactory2 (UINT     Flags,
   DXGI_LOG_CALL_3 ( L"                    CreateDXGIFactory2       ",
                     L"0x%04X, %hs, %08" _L(PRIxPTR) L"h",
                       Flags, iname.c_str (), (uintptr_t)ppFactory );
-
-  if (ppFactory == nullptr)
-    return DXGI_ERROR_INVALID_CALL;
 
   *ppFactory = nullptr;
 
@@ -11006,6 +11041,13 @@ SK_DXGI_QuickHook (void)
        PathFileExistsW (L"d3d11.dll") )
   {
     SK_LOGi0 (L" # DXGI QuickHook disabled because a local dxgi.dll or d3d11.dll is present...");
+
+    __SK_DisableQuickHook = TRUE;
+  }
+
+  if (config.compatibility.init_sync_for_reshade)
+  {
+    SK_LOGi0 (L" # DXGI QuickHook disabled because a ReShade Plug-In is present...");
 
     __SK_DisableQuickHook = TRUE;
   }

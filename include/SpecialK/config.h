@@ -200,8 +200,11 @@ struct sk_config_t
 
     SK_PerfTicksPerMs = SK_PerfFreq / 1000LL;
 
-    utility.hSignalAsyncSave =
-      SK_CreateEvent (nullptr, FALSE, FALSE, nullptr);
+    if (! SK_GetHostAppUtil ()->isBlacklisted ())
+    {
+      utility.hSignalAsyncSave =
+        SK_CreateEvent (nullptr, FALSE, FALSE, nullptr);
+    }
   }
   struct whats_new_s {
     float  duration       = 20.0F;
@@ -548,6 +551,7 @@ struct sk_config_t
   struct screenshots_s {
     bool         use_avif              = false;
     bool         use_hdr_png           = false;
+    int          max_st2084_bits       =    11;
     bool         use_jxl               = false;
     bool         png_compress          =  true;
     bool         show_osd_by_default   =  true;
@@ -923,6 +927,7 @@ struct sk_config_t
       bool    dump                 = false;
       bool    inject               =  true;
       bool    cache                =  true;
+      bool    orig_cache           =  true;// The initial setting when the game started
       bool    highlight_debug      =  true;
       bool    injection_keeps_fmt  = false;
       bool    generate_mips        = false;
@@ -1073,6 +1078,7 @@ struct sk_config_t
       bool    hook_raw_input      = true;
       bool    hook_windows_gaming = true;
       bool    hook_winmm          = true;
+      bool    allow_steam_winmm   = true;
       bool    native_ps4          = false;
       bool    bt_input_only       = false;
       float   low_battery_percent = 25.0f;
@@ -1147,6 +1153,7 @@ struct sk_config_t
       bool    catch_alt_f4        =  true;
       bool    override_alt_f4     = false; // For games that have prompts (i.e. DQ XI / Yakuza)
       int     disabled_to_game    =     2; //0 = Never, 1 = Always, 2 = In Background
+      int     org_disabled_to_game=     2;
       volatile
       UINT64  temporarily_allow   =     0; // Up until temporarily_allow + 1 frames,
     } keyboard;                            //   ignore "disabled_to_game"
@@ -1160,6 +1167,7 @@ struct sk_config_t
       //
       bool    fix_synaptics       = false;
       int     disabled_to_game    =    0; //0 = Never, 1 = Always, 2 = In Background
+      int     org_disabled_to_game=    0;
       UINT64  temporarily_allow   =    0; // Up until temporarily_allow + 1 frames,
                                           //   ignore "disabled_to_game"
       bool    ignore_small_clips  = false;// Ignore mouse clipping rects < 75% the
@@ -1241,6 +1249,7 @@ struct sk_config_t
     bool     allow_dxdiagn            =  true; // Slows game launches way down
     bool     auto_large_address_patch =  true;
     bool     init_on_separate_thread  =  true;
+    bool     init_sync_for_reshade    = false;
     bool     init_sync_for_streamline = false;
     bool     shutdown_on_window_close = false;
     bool     disable_dx12_vk_interop  = false;
@@ -1367,7 +1376,7 @@ struct sk_config_t
   } network;
 
   struct utility_functions_s {
-    HANDLE hSignalAsyncSave;
+    HANDLE hSignalAsyncSave     = nullptr;
 
     void save_async (void);
   } utility;
@@ -1709,6 +1718,7 @@ enum class SK_GAME_ID
   Transistor,                   // Transistor.exe
   MonsterHunterWilds,           // MonsterHunterWilds{Beta}.exe
   DragonAgeTheVeilguard,        // Dragon Age The Veilguard.exe
+  TombRaider123Remastered,      // tomb123.exe
 
   UNKNOWN_GAME               = 0xffff
 };

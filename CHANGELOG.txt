@@ -1,4 +1,119 @@
-﻿24.11.5.1
+﻿24.11.19
+========
+ + Restored support for using D3D11 Render Mod Tools in games with multiple
+     deferred contexts to debug shaders without crashing :)
+
+24.11.18
+========
+ + Disable SteamAPI file hash checks on Fallout 4
+ + Handle window activation more explicitly in Metaphor Re:Fantazio so that
+     its Keyboard Hook does not capture input events when the window is not
+       focused.
+
+24.11.16.3
+==========
+ + Fixed various problems indicated by static analysis...
+
+24.11.16.2
+==========
+ + Fixed problems with SK not re-initializing D3D11 when the active SwapChain
+     is destroyed and re-created.
+ + Fixed potential issues with loading ReShade as a plug-in and config files
+     not correctly being passed to create_effect_runtime (...).
+
+24.11.16.1
+==========
+ + Implement Lossy scRGB->HDR10 Quantization the correct way :)
+
+24.11.16
+========
+ + Added texture sampling fixes for Metaphor: ReFantazio so that it actually
+     can make use of anisotropic filtering, instead of setting MaxAnisotropy
+       and then using a texture filter that doesn't support anisotropic...
+ + Revert a few ReShade integration changes (synchronous loading of PlugIn)
+ + Added Lossy scRGB->HDR10 Quantization mode to reduce filesize on HDR PNG
+     screenshots.
+
+24.11.16
+========
+ + Disable GOG Overlay in Unity Engine games with AMD GPUs, because the GOG
+     overlay will cause AMD's shitty interop to kick in when it sets up for
+       OpenGL (an API the game does not use, but AMD's driver starts interop)
+
+24.11.15.3
+==========
+ + Fix various problems with games that use (Low Level) Keyboard hooks thinking
+     Alt/Tab are stuck.
+ + Allow mouselook in games even if Mouse Input is set to Disable in Background
+ + Added fixes for Metaphor: ReFantazio using wrong SRV formats for textures
+
+24.11.15.2
+==========
+ + Use synchronous init when loading ReShade as a plug-in for maximum compat.
+
+24.11.15.1
+==========
+ + Fixed ReShade (Add-on version) not being exempt from settings that block
+     mouse input to games.
+ + Added HUD vtx shader hashes for Metaphor: ReFantazio for hudless screenshots
+
+24.11.15
+========
+ + Add support for generating mipmaps for BC7 textures that are mip-incomplete,
+     they will be decompressed and then the mipmaps will be generated, and no
+       attempt to recompress them back to BC7 will be made because that's SLOW!
+
+24.11.14.2
+==========
+ + Revert recent change to foreground window checks.
+
+24.11.14.1
+==========
+ + When loading ReShade as a Plug-In, automatically load all AddOns in a Game
+     Profile's ReShade\AddOns\ directory and any in Global\ReShade\AddOns\.
+
+24.11.14
+========
+ + Prevent loading/saving INI files in blacklisted processes, and do not create
+     logs if blacklisted.
+ + Do not spawn an global injection unload listener in blacklisted processes.
+ + Render the first 120 frames in DXGI-based games without fractional VSYNC if
+     a game tries to use it, so that SK can detect VRR support correctly.
+
+24.11.13.2
+==========
+ + Fixed SK's UI not rendering correctly in D3D9Ex games beginning in 24.11.5.1
+ + Handle EDID Display Names that do not adhere to specs and do not space-pad
+     names shorter than 13 bytes.
+
+24.11.13.1
+==========
+ + Hide/disable "Overbright Tonemapping" when RenoDX ReShade AddOn is detected.
+
+24.11.13
+========
+ + Replace attempts by games to set DLSS Presets A-D with E, when DLSS version
+     is >= 3.8.10.
+   * Needed for Nixxes games, since they explicitly request Preset C instead of
+       DLSS default.
+
+24.11.11
+========
+ + Reinstate background render mode as default policy in Metaphor: ReFantazio.
+ + Allow Steam Input to hook and override WinMM Joystick APIs by default;
+
+     Steam Input's hooks can be disabled if needed (perf overhead) by setting:
+
+       [Input.Gamepad]
+       AllowSteamWinMM=false
+
+24.11.9
+=======
+ + Fixed INI parser not returning to the start of the INI to scan for macros
+     after looking for plug-ins to load.
+       (i.e. macros in SpecialK.ini or dxgi.ini being ignored)
+
+24.11.5.1
 =========
  + Detect local ReShade DLLs as ReShade, and allow pressing the default
      ReShade UI toggle keybind to work even if SK is blocking keyboard input

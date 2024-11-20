@@ -214,7 +214,8 @@ struct SK_HDR_Preset_s {
     __SK_HDR_Saturation        = saturation;
     __SK_HDR_Gamut             = gamut;
     __SK_HDR_tonemap           = colorspace.tonemap;
-    __SK_HDR_TonemapOverbright = tonemap_overbright;
+    __SK_HDR_TonemapOverbright = SK_ReShade_HasRenoDX () ? false
+                                                         : tonemap_overbright;
     __SK_HDR_ColorBoost        = pq_colorboost;
     __SK_HDR_PQBoost0          = pq_boost0;
     __SK_HDR_PQBoost1          = pq_boost1;
@@ -396,7 +397,7 @@ SK_Display_GetDeviceNameAndGUID (const wchar_t *wszPathName)
                 wszName+1;
 
       auto end =
-        name_and_guid.find (L"#");
+        name_and_guid.find (L'#');
 
       if (end != std::wstring::npos)
       {
@@ -927,8 +928,7 @@ public:
 
     // Games where 8-bit Compute Remastering has problems
     //
-    if (SK_GetCurrentGameID () == SK_GAME_ID::HaroldHalibut ||
-        SK_GetCurrentGameID () == SK_GAME_ID::Metaphor)
+    if (SK_GetCurrentGameID () == SK_GAME_ID::HaroldHalibut)
       SK_HDR_UnorderedViews_8bpc->PromoteTo16Bit = false;
 
     _SK_HDR_FullRange =
@@ -1713,7 +1713,7 @@ public:
 
             if (eotf_sel == ContentEotf_Custom)
             {
-              list += SK_FormatString ("Custom: %3.2f", __SK_HDR_Content_EOTF).c_str ();
+              list += SK_FormatString ("Custom: %3.2f", __SK_HDR_Content_EOTF);
             }
 
             else
@@ -2354,7 +2354,7 @@ public:
 
             const bool pboost = (preset.pq_boost0 > 0.0f);
 
-            if (abs (__SK_HDR_Luma) >= 1.0f && (! bRawImageMode))
+            if (abs (__SK_HDR_Luma) >= 1.0f && (! bRawImageMode) && (! SK_ReShade_HasRenoDX ()))
             {
               if (ImGui::Checkbox ("Tonemap Overbright Bits", &preset.tonemap_overbright))
               {

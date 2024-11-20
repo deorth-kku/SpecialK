@@ -220,9 +220,9 @@ public:
 
         if (config.display.monitor_idx != set)
         {
-          config.display.monitor_idx      = set;
-          config.display.monitor_handle   =   0; // Clear until we validate the idx
-          config.display.monitor_path_ccd = L"";
+          config.display.monitor_idx      =    set;
+          config.display.monitor_handle   =      0; // Clear until we validate the idx
+          config.display.monitor_path_ccd.clear ();
 
           if (set != 0) // 0 = No Preference (i.e. clear preference w/o moving)
           {
@@ -5678,7 +5678,7 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
       {
         return 0;
       }
-    }
+    } break;
 
     case WM_QUIT:
     case WM_CLOSE:
@@ -6788,8 +6788,8 @@ SK_Win32_IsDummyWindowClass (WNDCLASSEXW* pWindowClass)
     (*pWindowClass->lpszClassName == L'S' && StrStrW (pWindowClass->lpszClassName, L"SKIV_NotificationIcon"))                 || // SKIV's thingy...
 
     // F' it, there's a pattern here, just ignore all dummies.
-    (*pWindowClass->lpszClassName == L'D'||
-     *pWindowClass->lpszClassName == L'D' ) && StrStrIW (pWindowClass->lpszClassName, L"dummy");
+    ((*pWindowClass->lpszClassName == L'D'||
+      *pWindowClass->lpszClassName == L'd' ) && StrStrIW (pWindowClass->lpszClassName, L"dummy"));
 
   if ((*pWindowClass->lpszClassName == L'Q'  ||
        *pWindowClass->lpszClassName == L'q') &&
