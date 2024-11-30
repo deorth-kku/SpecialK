@@ -740,10 +740,16 @@ NtWaitForSingleObject_Detour (
   //  Timeout = nullptr;
 #pragma endregion
 
-  auto ret =
-    NtWaitForSingleObject_Original (
-      Handle, Alertable, Timeout
-    );
+  auto ret = STATUS_TIMEOUT;
+
+  // Waiting while debugging occasionally causes crashes
+  __try {
+    ret =
+      NtWaitForSingleObject_Original (
+        Handle, Alertable, Timeout
+      );
+  } __except (GetExceptionCode () == EXCEPTION_ACCESS_VIOLATION ? EXCEPTION_EXECUTE_HANDLER
+                                                                : EXCEPTION_CONTINUE_SEARCH) {};
 
   if (ret != STATUS_TIMEOUT)
     SK_MMCS_ApplyPendingTaskPriority ();
@@ -1821,15 +1827,15 @@ void SK_Scheduler_Init (void)
                                SwitchToThread_Detour,
       static_cast_p2p <void> (&SwitchToThread_Original) );
 
-    SK_CreateDLLHook2 (      L"NtDll",
-                              "NtWaitForSingleObject",
-                               NtWaitForSingleObject_Detour,
-      static_cast_p2p <void> (&NtWaitForSingleObject_Original) );
+    ////SK_CreateDLLHook2 (      L"NtDll",
+    ////                          "NtWaitForSingleObject",
+    ////                           NtWaitForSingleObject_Detour,
+    ////  static_cast_p2p <void> (&NtWaitForSingleObject_Original) );
 
-    SK_CreateDLLHook2 (      L"NtDll",
-                              "NtWaitForMultipleObjects",
-                               NtWaitForMultipleObjects_Detour,
-      static_cast_p2p <void> (&NtWaitForMultipleObjects_Original) );
+    ////SK_CreateDLLHook2 (      L"NtDll",
+    ////                          "NtWaitForMultipleObjects",
+    ////                           NtWaitForMultipleObjects_Detour,
+    ////  static_cast_p2p <void> (&NtWaitForMultipleObjects_Original) );
 
     SK_CreateDLLHook2 (      L"Kernel32",
                               "SetProcessAffinityMask",

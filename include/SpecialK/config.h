@@ -809,7 +809,7 @@ struct sk_config_t
       bool    temporary_dwm_hdr    = false; // Always turns HDR on and off for this game
       bool    disable_virtual_vbi  =  true; // Disable Windows 11 Dynamic Refresh Rate
       bool    ignore_thread_flags  = false; // Remove threading flags from D3D11 devices
-      bool    clear_flipped_chain  =  true; // Clear buffers on present? (non-compliant)
+      bool    clear_flipped_chain  = false; // Clear buffers on present? (non-compliant)
       float   chain_clear_color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
       bool    suppress_resize_fail =  true; // Workaround DLSS FrameGen compat. issues in D3D12
       bool    suppress_rtv_mismatch= false; // Hide SwapChain RTV format warnings for buggy games
@@ -1078,10 +1078,13 @@ struct sk_config_t
       bool    hook_raw_input      = true;
       bool    hook_windows_gaming = true;
       bool    hook_winmm          = true;
+      bool    hook_game_input     = true;
       bool    allow_steam_winmm   = true;
       bool    native_ps4          = false;
       bool    bt_input_only       = false;
       float   low_battery_percent = 25.0f;
+      float   impulse_strength_l  = 0.75f;
+      float   impulse_strength_r  = 0.75f;
 
       struct xinput_s {
         unsigned
@@ -1268,6 +1271,11 @@ struct sk_config_t
       int    use_joystick_thread      =    -1;
       int    poll_sentinel            =    -1;
     } sdl;
+    // Messages that SK may post to a game's
+    //   window in order to trigger various
+    //     window management responsibilities.
+    bool     allow_fake_displaychange =  true;
+    bool     allow_fake_size          =  true;
   } compatibility;
 
   struct apis_s {
@@ -1720,6 +1728,7 @@ enum class SK_GAME_ID
   DragonAgeTheVeilguard,        // Dragon Age The Veilguard.exe
   TombRaider123Remastered,      // tomb123.exe
   Stalker2,                     // Stalker2-WinGDK-Shipping.exe (Microsoft Store) Stalker2-Win64-Shipping.exe (Steam)
+  vlc,                          // vlc.exe
 
   UNKNOWN_GAME               = 0xffff
 };

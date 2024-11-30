@@ -124,11 +124,11 @@ SK_HID_DeviceFile::SK_HID_DeviceFile (HANDLE file, const wchar_t *wszPath)
     wcsncpy_s ( wszDevicePath, MAX_PATH,
                 wszPath,       _TRUNCATE );
 
-    wcsncpy_s (            wszProductName,      128,
+    wcsncpy_s (            wszProductName,      2047,
                 known_path.wszProductName,           _TRUNCATE );
-    wcsncpy_s (            wszManufacturerName, 128,
+    wcsncpy_s (            wszManufacturerName, 2047,
                 known_path.wszManufacturerName,      _TRUNCATE );
-    wcsncpy_s (            wszSerialNumber,     128,
+    wcsncpy_s (            wszSerialNumber,     2047,
                 known_path.wszSerialNumber,          _TRUNCATE );
 
     device_type         = known_path.device_type;
@@ -177,17 +177,17 @@ SK_HID_DeviceFile::SK_HID_DeviceFile (HANDLE file, const wchar_t *wszPath)
             {
               SK_DeviceIoControl (
                 hFile, IOCTL_HID_GET_PRODUCT_STRING, 0, 0,
-                wszProductName, 128, &dwBytesRead, nullptr
+                wszProductName, 4093, &dwBytesRead, nullptr
               );
 
               SK_DeviceIoControl (
                 hFile, IOCTL_HID_GET_MANUFACTURER_STRING, 0, 0,
-                wszManufacturerName, 128, &dwBytesRead, nullptr
+                wszManufacturerName, 4093, &dwBytesRead, nullptr
               );
 
               SK_DeviceIoControl (
                 hFile, IOCTL_HID_GET_SERIALNUMBER_STRING, 0, 0,
-                wszSerialNumber, 128, &dwBytesRead, nullptr
+                wszSerialNumber, 4093, &dwBytesRead, nullptr
               );
 
               setPollingFrequency (0);
@@ -284,17 +284,17 @@ SK_HID_DeviceFile::SK_HID_DeviceFile (HANDLE file, const wchar_t *wszPath)
             {
               SK_DeviceIoControl (
                 hFile, IOCTL_HID_GET_PRODUCT_STRING, 0, 0,
-                wszProductName, 128, &dwBytesRead, nullptr
+                wszProductName, 4093, &dwBytesRead, nullptr
               );
 
               SK_DeviceIoControl (
                 hFile, IOCTL_HID_GET_MANUFACTURER_STRING, 0, 0,
-                wszManufacturerName, 128, &dwBytesRead, nullptr
+                wszManufacturerName, 4093, &dwBytesRead, nullptr
               );
 
               SK_DeviceIoControl (
                 hFile, IOCTL_HID_GET_SERIALNUMBER_STRING, 0, 0,
-                wszSerialNumber, 128, &dwBytesRead, nullptr
+                wszSerialNumber, 4093, &dwBytesRead, nullptr
               );
 
               SK_ImGui_Warning (wszSerialNumber);
@@ -1268,6 +1268,9 @@ SK_StrSupW (const wchar_t *wszString, const wchar_t *wszPattern, int len = -1)
   if (len == -1)
       len = sk::narrow_cast <int> (wcslen (wszPattern));
 
+  len =
+    std::min (len, sk::narrow_cast <int> (wcslen (wszPattern)));
+
   return
     0 == StrCmpNIW (wszString, wszPattern, len);
 }
@@ -1280,6 +1283,9 @@ SK_StrSupA (const char *szString, const char *szPattern, int len = -1)
 
   if (len == -1)
       len = sk::narrow_cast <int> (strlen (szPattern));
+
+  len =
+    std::min (len, sk::narrow_cast <int> (strlen (szString)));
 
   return
     0 == StrCmpNIA (szString, szPattern, len);
@@ -1349,7 +1355,7 @@ CreateFileA_Detour (LPCSTR                lpFileName,
           SK_Input_DeviceFiles.insert (hRet);
         }
 
-        auto&& dev_file =
+        auto& dev_file =
           SK_HID_DeviceFiles [hRet];
 
         for (auto& overlapped_request : dev_file._overlappedRequests)
@@ -1359,7 +1365,7 @@ CreateFileA_Detour (LPCSTR                lpFileName,
           overlapped_request.second.lpBuffer              = nullptr;
         }
 
-        dev_file = std::move (hid_file);
+        dev_file = hid_file;
       }
     }
 
@@ -1448,7 +1454,7 @@ CreateFile2_Detour (
           SK_Input_DeviceFiles.insert (hRet);
         }
 
-        auto&& dev_file =
+        auto& dev_file =
           SK_HID_DeviceFiles [hRet];
 
         for (auto& overlapped_request : dev_file._overlappedRequests)
@@ -1458,7 +1464,7 @@ CreateFile2_Detour (
           overlapped_request.second.lpBuffer              = nullptr;
         }
 
-        dev_file = std::move (hid_file);
+        dev_file = hid_file;
       }
     }
 
@@ -1549,7 +1555,7 @@ CreateFileW_Detour ( LPCWSTR               lpFileName,
           SK_Input_DeviceFiles.insert (hRet);
         }
 
-        auto&& dev_file =
+        auto& dev_file =
           SK_HID_DeviceFiles [hRet];
 
         for (auto& overlapped_request : dev_file._overlappedRequests)
@@ -1559,7 +1565,7 @@ CreateFileW_Detour ( LPCWSTR               lpFileName,
           overlapped_request.second.lpBuffer              = nullptr;
         }
 
-        dev_file = std::move (hid_file);
+        dev_file = hid_file;
       }
     }
 
@@ -2199,7 +2205,7 @@ SK_Input_HookHID (void)
     SK_GetOverlappedResult   = GetOverlappedResult_Original;
     SK_GetOverlappedResultEx = GetOverlappedResultEx_Original;
 
-    if (ReadAcquire (&__SK_Init) > 0) SK_ApplyQueuedHooks ();
+    SK_ApplyQueuedHooks ();
 
     InterlockedIncrementRelease (&hooked);
   }

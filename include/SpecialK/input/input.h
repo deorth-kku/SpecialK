@@ -46,6 +46,8 @@ extern int64_t       SK_PerfFreq;
 bool SK_ImGui_WantGamepadCapture  (bool update = false);
 bool SK_ImGui_WantHWCursor        (void);
 bool SK_ImGui_WantMouseCapture    (bool update = false);
+bool SK_ImGui_WantMouseButtonCapture
+                                  (void);
 bool SK_ImGui_WantMouseCaptureEx  (DWORD dwReasonMask = 0xFFFF);
 bool SK_ImGui_WantKeyboardCapture (bool update = false);
 bool SK_ImGui_WantTextCapture     (void);
@@ -105,25 +107,26 @@ enum class sk_cursor_state {
 
 struct sk_imgui_cursor_s
 {
-  HWND    child_input   =   HWND_DESKTOP;
-  RECT    child_client  = { 0, 0, 0, 0 };
-  RECT    child_rect    = { 0, 0, 0, 0 };
+  HWND    child_input     =   HWND_DESKTOP;
+  RECT    child_client    = { 0, 0, 0, 0 };
+  RECT    child_rect      = { 0, 0, 0, 0 };
 
-  HCURSOR real_img      =        nullptr;
-  POINT   orig_pos      =       { 0, 0 };
-  bool    orig_vis      =          false;
+  HCURSOR real_img        =        nullptr;
+  POINT   orig_pos        =       { 0, 0 };
+  bool    orig_vis        =          false;
 
-  HCURSOR img           =        nullptr;
-  POINT   pos           =       { 0, 0 };
+  HCURSOR img             =        nullptr;
+  POINT   pos             =       { 0, 0 };
 
-  bool    visible       =          false;
-  bool    idle          =           true; // Hasn't moved
-  DWORD   last_move     =       MAXDWORD;
-  DWORD   last_toggle   =              0;
-  DWORD   refs_added    =              0;
-  DWORD64 times_set     =              0; // Times the game has set a non-zero cursor
+  bool    visible         =          false;
+  bool    idle            =           true; // Hasn't moved
+  DWORD   last_move       =       MAXDWORD;
+  DWORD   last_toggle     =              0;
+  DWORD   refs_added      =              0;
+  POINT   last_screen_pos =       { 0, 0 };
+  DWORD64 times_set       =              0; // Times the game has set a non-zero cursor
 
-  sk_cursor_state force = sk_cursor_state::None;
+  sk_cursor_state force   = sk_cursor_state::None;
 
   void    showSystemCursor (bool system = true);
   void    showImGuiCursor  (void);
@@ -449,6 +452,7 @@ extern SK_LazyGlobal <sk_input_api_context_s> SK_Win32_Backend;
 extern SK_LazyGlobal <sk_input_api_context_s> SK_WinMM_Backend;
 extern SK_LazyGlobal <sk_input_api_context_s> SK_WinHook_Backend;    // (Low-Level) KB/M Hook
 extern SK_LazyGlobal <sk_input_api_context_s> SK_RawInput_Backend;
+extern SK_LazyGlobal <sk_input_api_context_s> SK_GameInput_Backend;
 extern SK_LazyGlobal <sk_input_api_context_s> SK_MessageBus_Backend; // NVIDIA stuff
 
 
@@ -1035,18 +1039,22 @@ struct SK_HID_PlayStationDevice
 
   struct vibration_s {
     volatile ULONG left, right;
-    BYTE           last_left,
-                   last_right;
-    DWORD          last_set;
-    DWORD          last_output;
+    volatile ULONG last_set;
 
-    USHORT         max_val = 0;
+    struct {
+      volatile ULONG left;
+      volatile ULONG right;
+      ULONG     last_left;
+      ULONG     last_right;
+    } trigger;
+
+    volatile ULONG max_val = 0;
 
     // At most, allow the controller to vibrate for 1000 ms without
     //   some kind of attempt to set a new value... otherwise, it
     //     will tend to vibrate infinitely.
     static constexpr auto MAX_TTL_IN_MSECS = 1000UL;
-  } _vibration = { 0, 0, 0, 0, 0, 0 };
+  } _vibration = { 0, 0, 0, 0, 0, 0, 0, 0 };
 
   void setRGB (BYTE red, BYTE green, BYTE blue) {
     _color.r = red;
@@ -1056,6 +1064,12 @@ struct SK_HID_PlayStationDevice
 
   void setVibration ( USHORT left,
                       USHORT right,
+                      USHORT max_val = std::numeric_limits <USHORT>::max () );
+
+  void setVibration ( USHORT low_freq,
+                      USHORT high_freq,
+                      USHORT left_trigger,
+                      USHORT right_trigger,
                       USHORT max_val = std::numeric_limits <USHORT>::max () );
 
   bool request_input_report (void);
@@ -1076,9 +1090,9 @@ struct SK_HID_OverlappedRequest {
 
 struct SK_HID_DeviceFile {
   HIDP_CAPS         hidpCaps                           = { };
-  wchar_t           wszProductName      [128]          = { };
-  wchar_t           wszManufacturerName [128]          = { };
-  wchar_t           wszSerialNumber     [128]          = { };
+  wchar_t           wszProductName      [2048]         = { };
+  wchar_t           wszManufacturerName [2048]         = { };
+  wchar_t           wszSerialNumber     [2048]         = { };
   wchar_t           wszDevicePath       [MAX_PATH + 2] = { };
   sk_input_dev_type device_type                        = sk_input_dev_type::Other;
   USHORT            device_vid                         = 0x0;

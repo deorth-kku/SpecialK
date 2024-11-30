@@ -566,6 +566,24 @@ SK_ReShadeAddOn_ToggleOverlay (void)
   SK_ReShadeAddOn_ActivateOverlay (!ReShadeOverlayActive);
 }
 
+void
+__cdecl
+SK_ReShadeAddOn_DisplayChange (reshade::api::effect_runtime *runtime, reshade::api::display* display)
+{
+  std::ignore = runtime;
+  std::ignore = display;
+
+#if 0
+  auto width    = display != nullptr ? (display->get_desktop_coords ().right-display->get_desktop_coords ().left) : 0;
+  auto height   = display != nullptr ? (display->get_desktop_coords ().bottom-display->get_desktop_coords ().top) : 0;
+  float refresh = display != nullptr ? (display->get_refresh_rate ().as_float ())                                 : 0.0f;
+
+  SK_ImGui_Warning (
+    SK_FormatStringW (L"ReShade Display Change: %ws (%dx%d@%3.1fHz)", display != nullptr ? display->get_display_name () : L"Unknown Monitor", width, height, refresh).c_str ()
+  );
+#endif
+}
+
 bool
 __cdecl
 SK_ReShadeAddOn_OverlayActivation (reshade::api::effect_runtime *runtime, bool open, reshade::api::input_source source)
@@ -1099,24 +1117,48 @@ SK_ReShadeAddOn_Init (HMODULE reshade_module)
           CreateDirectoryW (addon_path.c_str (), nullptr);
   }
 
+  bool fully_compatible = true;
+
   if ( StrStrIW (mod_name.c_str (), L"dxgi.dll") ||
        StrStrIW (mod_name.c_str (), L"d3d12.dll") )
   {
+    config.apis.OpenGL.hook      = false;
+    config.apis.OpenGL.hook_next = false;
+    config.apis.d3d9.hook        = false;
+    config.apis.d3d9.hook_next   = false;
+    config.apis.d3d9ex.hook      = false;
+    config.apis.d3d9ex.hook_next = false;
+
+    if (config.apis.last_known == SK_RenderAPI::OpenGL)
+        config.apis.last_known =  SK_RenderAPI::Reserved;
+    if (config.apis.last_last_known == SK_RenderAPI::OpenGL)
+        config.apis.last_last_known =  SK_RenderAPI::Reserved;
+
+    if (config.apis.last_known == SK_RenderAPI::D3D9)
+        config.apis.last_known =  SK_RenderAPI::Reserved;
+    if (config.apis.last_last_known == SK_RenderAPI::D3D9)
+        config.apis.last_last_known =  SK_RenderAPI::Reserved;
+
+    if (config.apis.last_known == SK_RenderAPI::D3D9Ex)
+        config.apis.last_known =  SK_RenderAPI::Reserved;
+    if (config.apis.last_last_known == SK_RenderAPI::D3D9Ex)
+        config.apis.last_last_known =  SK_RenderAPI::Reserved;
+
     if ((config.apis.last_last_known == SK_RenderAPI::Reserved &&
          config.apis.     last_known == SK_RenderAPI::Reserved) ||
          config.apis.     last_known == SK_RenderAPI::D3D12     ||
          config.apis.last_last_known == SK_RenderAPI::D3D12)
     {
-      SK_RunOnce (
-        SK_ImGui_WarningWithTitle (
-          L"ReShade may cause serious problems if loaded as dxgi.dll/d3d12.dll in D3D12 games rather than a plug-in.\r\n\r\n"
-          L"\tThis may be a false positive\r\n\r\n"
-          L"If you are not using D3D12, the message will go away and all of ReShade's features should work after restarting the game.",
-          L"Incompatible ReShade Install Detected"
-        )
-      );
+      //SK_RunOnce (
+      //  SK_ImGui_WarningWithTitle (
+      //    L"ReShade is not fully compatible with Special K when loaded as dxgi.dll/d3d12.dll in D3D12 games.\r\n\r\n"
+      //    L"\tThis may be a false positive\r\n\r\n"
+      //    L"If you are not using D3D12, the message will go away and all of ReShade's features should work after restarting the game.",
+      //    L"Incompatible ReShade is Detected"
+      //  )
+      //);
 
-      return false;
+      fully_compatible = false;
     }
   }
 
@@ -1125,8 +1167,8 @@ SK_ReShadeAddOn_Init (HMODULE reshade_module)
   if (registered)
     return true;
 
-  registered =
-    reshade::register_addon (SK_GetDLL (), reshade_module);
+  registered = fully_compatible ?
+    reshade::register_addon (SK_GetDLL (), reshade_module) : true;
 
   if (registered)
   {
@@ -1141,15 +1183,19 @@ SK_ReShadeAddOn_Init (HMODULE reshade_module)
     if (! PathIsDirectoryW (shared_addon_path.c_str ()))
           CreateDirectoryW (shared_addon_path.c_str (), nullptr);
 
-    config.reshade.is_addon = true;
+    if (fully_compatible)
+    {
+      config.reshade.is_addon = true;
 
-    reshade::register_event <reshade::addon_event::present>                (SK_ReShadeAddOn_Present);
-    reshade::register_event <reshade::addon_event::init_effect_runtime>    (SK_ReShadeAddOn_InitRuntime);
-    reshade::register_event <reshade::addon_event::destroy_effect_runtime> (SK_ReShadeAddOn_DestroyRuntime);
-    reshade::register_event <reshade::addon_event::destroy_device>         (SK_ReShadeAddOn_DestroyDevice);
-    reshade::register_event <reshade::addon_event::destroy_swapchain>      (SK_ReShadeAddOn_DestroySwapChain);
-    reshade::register_event <reshade::addon_event::destroy_command_queue>  (SK_ReShadeAddOn_DestroyCmdQueue);
-    reshade::register_event <reshade::addon_event::reshade_open_overlay>   (SK_ReShadeAddOn_OverlayActivation);
+      reshade::register_event <reshade::addon_event::present>                (SK_ReShadeAddOn_Present);
+      reshade::register_event <reshade::addon_event::init_effect_runtime>    (SK_ReShadeAddOn_InitRuntime);
+      reshade::register_event <reshade::addon_event::destroy_effect_runtime> (SK_ReShadeAddOn_DestroyRuntime);
+      reshade::register_event <reshade::addon_event::destroy_device>         (SK_ReShadeAddOn_DestroyDevice);
+      reshade::register_event <reshade::addon_event::destroy_swapchain>      (SK_ReShadeAddOn_DestroySwapChain);
+      reshade::register_event <reshade::addon_event::destroy_command_queue>  (SK_ReShadeAddOn_DestroyCmdQueue);
+      reshade::register_event <reshade::addon_event::reshade_open_overlay>   (SK_ReShadeAddOn_OverlayActivation);
+      reshade::register_event <reshade::addon_event::display_change>         (SK_ReShadeAddOn_DisplayChange);
+    }
 
     auto _AutoLoadAddOns = [&](void)
     {
@@ -1178,8 +1224,8 @@ SK_ReShadeAddOn_Init (HMODULE reshade_module)
           const auto filename      = path.filename ().wstring  ();
           const auto filename_utf8 = path.filename ().u8string ();
 
-          dll_log->LogEx (
-            true, L"[ SpecialK ]  * Loading ReShade AddOn: '%ws' from '%ws' ... ",
+          dll_log->Log (
+            L"[ SpecialK ]  * Loading ReShade AddOn: '%ws' from '%ws' ... ",
               filename.c_str (),
             SK_StripUserNameFromPathW (path.parent_path ().wstring ().data ())
           );
@@ -1190,7 +1236,7 @@ SK_ReShadeAddOn_Init (HMODULE reshade_module)
 
           if (hModAddOn != skModuleRegistry::INVALID_MODULE)
           {
-            dll_log->LogEx (false, L"success!\n");
+            //dll_log->LogEx (false, L"success!\n");
 
             // Don't announce global AddOns
             if (! StrStrIW (path.c_str (), L"Global\\ReShade\\"))
@@ -1209,7 +1255,7 @@ SK_ReShadeAddOn_Init (HMODULE reshade_module)
           {
             _com_error err (HRESULT_FROM_WIN32 (GetLastError ()));
 
-            dll_log->LogEx (false, L"failed: 0x%04X (%s)!\n",
+            dll_log->Log (L"LoadLibrary failed: 0x%04X (%s)!\n",
                             err.WCode (), err.ErrorMessage () );
           }
         }

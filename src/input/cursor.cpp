@@ -529,6 +529,19 @@ sk_imgui_cursor_s::activateWindow (bool active)
 static constexpr const DWORD REASON_DISABLED = 0x4;
 
 bool
+sk_window_s::isCursorHovering (void)
+{
+  if (! SK_GImDefaultContext ())
+    return mouse.inside;
+
+  const auto& io =
+    ImGui::GetIO ();
+
+  return
+    mouse.inside && io.MousePos.x != -FLT_MAX && io.MousePos.y != -FLT_MAX;
+}
+
+bool
 SK_ImGui_WantMouseCaptureEx (DWORD dwReasonMask)
 {
   if (! SK_GImDefaultContext ())
@@ -554,6 +567,10 @@ SK_ImGui_WantMouseCaptureEx (DWORD dwReasonMask)
 
   bool imgui_capture = false;
 
+  LRESULT           hit_test = 0;
+  POINT             ptCursor;
+  SK_GetCursorPos (&ptCursor);
+
   if (SK_ImGui_IsMouseRelevantEx (false))
   {
     static const auto& io =
@@ -573,6 +590,28 @@ SK_ImGui_WantMouseCaptureEx (DWORD dwReasonMask)
 
     if (game_window.active && ReadULong64Acquire (&config.input.mouse.temporarily_allow) > SK_GetFramesDrawn () - 20)
       imgui_capture = false;
+
+    if ((! imgui_capture) && (! game_window.isCursorHovering ()) && (! SK_IsGameWindowActive ()))
+    {
+      hit_test =
+        DefWindowProcW (game_window.hWnd,WM_NCHITTEST,0,MAKELPARAM(ptCursor.x,ptCursor.y));
+
+      // Do not block the mouse while it is on the window's titlebar, resize grips, etc.
+      if (hit_test == HTCLIENT)
+      {
+        if (SK_WantBackgroundRender ())
+          imgui_capture = true;
+
+        else
+        {
+          DWORD                                                                         dwProcId;
+          GetWindowThreadProcessId (WindowFromPoint (SK_ImGui_Cursor.last_screen_pos), &dwProcId);
+
+          if (dwProcId != GetCurrentProcessId ())
+            imgui_capture = true;
+        }
+      }
+    }
   }
 
   if ((! SK_IsGameWindowActive ()) && config.input.mouse.disabled_to_game == SK_InputEnablement::DisabledInBackground)
@@ -587,6 +626,27 @@ SK_ImGui_WantHWCursor (void)
 {
   return
     ( config.input.ui.use_hw_cursor );
+}
+
+bool
+SK_ImGui_WantMouseButtonCapture (void)
+{
+  bool capture = SK_ImGui_WantMouseCapture ();
+  if ( capture )
+  {
+    POINT                 ptCursor = {};
+    if (SK_GetCursorPos (&ptCursor))
+    {
+      LRESULT hit_test =
+        DefWindowProcW (game_window.hWnd,WM_NCHITTEST,0,MAKELPARAM(ptCursor.x,ptCursor.y));
+
+      // Do not block the mouse while it is on the window's titlebar, resize grips, etc.
+      if (hit_test > HTCLIENT)
+        capture = false;
+    }
+  }
+
+  return capture;
 }
 
 bool
@@ -1057,8 +1117,7 @@ GetCursorPos_Detour (LPPOINT lpPoint)
 #endif
   }
 
-
-  if (SK_ImGui_IsMouseRelevant ())
+  if (!game_window.isCursorHovering () || SK_ImGui_IsMouseRelevant())
   {
     //
     // Compute delta mouse coordinates for games that use cursor warping (i.e. mouselook)

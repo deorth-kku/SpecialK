@@ -1380,8 +1380,12 @@ IWrapDXGISwapChain::GetFrameLatencyWaitableObject (void)
       std::clamp (config.render.framerate.pre_render_limit, 1, 14) );
   }
 
-  // Disable waitable SwapChains when HW Flip Queue is active, they don't work right...
-  if (false)//rb.windows.unity || rb.windows.unreal)// || rb.displays [rb.active_display].wddm_caps._3_0.HwFlipQueueEnabled)
+  //auto& rb =
+  //  SK_GetCurrentRenderBackend ();
+  //
+  //// Disable waitable SwapChains when HW Flip Queue is active, they don't work right...
+  //if (rb.windows.unity || rb.windows.unreal)// || rb.displays [rb.active_display].wddm_caps._3_0.HwFlipQueueEnabled)
+  if (false)
   {
     static HANDLE fake_waitable =
       SK_CreateEvent (nullptr, TRUE, TRUE, nullptr);
@@ -2054,7 +2058,37 @@ SK_DXGI_SwapChain_ResizeBuffers_Impl (
     if (SUCCEEDED (ret))
     {
       if      (rb.api == SK_RenderAPI::D3D12) _d3d12_rbk->init ((IDXGISwapChain3 *)pSwapChain, _d3d12_rbk->_pCommandQueue);
-      else if (rb.api == SK_RenderAPI::D3D11) _d3d11_rbk->init ((IDXGISwapChain3 *)pSwapChain, _d3d11_rbk->_pDevice, _d3d11_rbk->_pDeviceCtx);
+      else if (rb.api == SK_RenderAPI::D3D11)
+      { // The D3D11 backend releases device and device context, unlike D3D12 that has a
+        //   persistent command queue object across destruction and creation of new swapchains.
+        SK_ComPtr<ID3D11Device>        pDevice    (_d3d11_rbk->_pDevice);
+        SK_ComPtr<ID3D11DeviceContext> pDeviceCtx (_d3d11_rbk->_pDeviceCtx);
+
+        if (     pDevice    &&                 !pDeviceCtx.p)
+                 pDevice->GetImmediateContext (&pDeviceCtx.p);
+        else if (pDeviceCtx &&          !pDevice.p)
+                 pDeviceCtx->GetDevice (&pDevice.p);
+        if (SUCCEEDED(pSwapChain->GetDevice (IID_ID3D11Device,
+          reinterpret_cast<void **>(&pDevice.p))))
+                                     pDevice->
+                GetImmediateContext(&pDeviceCtx.p);
+
+        if (rb.device == nullptr)
+        {
+          rb.setDevice (pDevice);
+          rb.d3d11.immediate_ctx = pDeviceCtx;
+        }
+
+        _d3d11_rbk->init ((IDXGISwapChain3 *)pSwapChain, pDevice, pDeviceCtx);
+      }
+    }
+
+    else
+    {
+      rb.releaseOwnedResources ();
+
+      if      (rb.api == SK_RenderAPI::D3D12) ResetImGui_D3D12 (pSwapChain);
+      else if (rb.api == SK_RenderAPI::D3D11) ResetImGui_D3D11 (pSwapChain);
     }
   };
 
@@ -2386,10 +2420,16 @@ SK_DXGI_SwapChain_ResizeBuffers_Impl (
     {
       if (ret != DXGI_ERROR_DEVICE_REMOVED && ret != E_ACCESSDENIED)
       {
-        SK_LOGi0 ( L"SwapChain Resize Failed (%x) - Error Suppressed!",
-                    ret );
+        SK_LOGi0 ( L"SwapChain Resize Failed [%x](%ws)!",
+                    ret, _com_error (ret).ErrorMessage () );
 
         _ReleaseResourcesAndRetryResize (ret);
+
+        if (SUCCEEDED (ret))
+        {
+          SK_LOGi0 (L" # Successfully recovered after a full teardown of all "
+                    L"owned and shared SwapChain resources.");
+        }
       }
     }
 
@@ -2463,10 +2503,16 @@ SK_DXGI_SwapChain_ResizeBuffers_Impl (
   {
     if (ret != DXGI_ERROR_DEVICE_REMOVED && ret != E_ACCESSDENIED)
     {
-      SK_LOGi0 ( L"SwapChain Resize Failed (%x) - Error Suppressed!",
-                  ret );
+      SK_LOGi0 ( L"SwapChain Resize Failed [%x](%ws)!",
+                  ret, _com_error (ret).ErrorMessage () );
 
       _ReleaseResourcesAndRetryResize (ret);
+
+      if (SUCCEEDED (ret))
+      {
+        SK_LOGi0 (L" # Successfully recovered after a full teardown of all "
+                  L"owned and shared SwapChain resources.");
+      }
     }
   }
 
@@ -2475,6 +2521,12 @@ SK_DXGI_SwapChain_ResizeBuffers_Impl (
     _ReleaseResourcesAndRetryResize (ret);
 
     rb.swapchain_consistent = SUCCEEDED (ret);
+
+    if (rb.swapchain_consistent)
+    {
+      SK_LOGi0 (L" # Successfully recovered after a full teardown of all "
+                L"owned and shared SwapChain resources.");
+    }
 
     if (SK_IsDebuggerPresent ())
     {

@@ -33,6 +33,7 @@
 #define __SK_SUBSYSTEM__ L"D3D12BkEnd"
 
 #define SK_D3D12_PERSISTENT_IMGUI_DEV_OBJECTS
+//#define SK_D3D12_STATE_TRACK
 
 D3D12GraphicsCommandList_ResourceBarrier_pfn
 D3D12GraphicsCommandList_ResourceBarrier_Original     = nullptr;
@@ -354,11 +355,12 @@ ImGui_ImplDX12_RenderDrawData ( ImDrawData* draw_data,
   ctx->SetDescriptorHeaps       (1, &descriptorHeaps.pImGui.p);
 
 
-
+#ifdef D3D12_STATE_TRACK
   // Don't let the user disable ImGui's pipeline state (!!)
   bool                                                                                         _enable = false;
   _imgui_d3d12.pPipelineState->SetPrivateData (SKID_D3D12DisablePipelineState, sizeof (bool), &_enable);
   SK_RunOnce (_criticalVertexShaders.insert (_imgui_d3d12.pPipelineState));
+#endif
 
 
   //
@@ -1197,6 +1199,9 @@ ImGui_ImplDX12_Init ( ID3D12Device*               device,
 void
 ImGui_ImplDX12_Shutdown (void)
 {
+  extern void SK_D3D12_ProcessScreenshotQueueEx (SK_ScreenshotStage,              bool, bool);
+              SK_D3D12_ProcessScreenshotQueueEx (SK_ScreenshotStage::_FlushQueue, true,false); 
+
   ///ImGui_ImplDX12_Data* bd = ImGui_ImplDX12_GetBackendData();
   ///IM_ASSERT(bd != nullptr && "No renderer backend to shutdown, or already shutdown?");
 
@@ -1292,6 +1297,7 @@ D3D12GraphicsCommandList_SetPipelineState_Detour (
 {
   SK_LOG_FIRST_CALL
 
+#ifdef D3D12_STATE_TRACK
   if (pPipelineState != nullptr)
   {
     // We do not actually care what this is, only that it exists.
@@ -1323,6 +1329,7 @@ D3D12GraphicsCommandList_SetPipelineState_Detour (
       SKID_D3D12DisablePipelineState,  sizeof (bool),
                                              &disable );
   }
+#endif
 
   D3D12GraphicsCommandList_SetPipelineState_Original ( This,
                                                         pPipelineState );
@@ -1373,6 +1380,7 @@ D3D12GraphicsCommandList_DrawInstanced_Detour (
 {
   SK_LOG_FIRST_CALL
 
+#ifdef D3D12_STATE_TRACK
   UINT size    = sizeof (bool);
   bool disable = false;
 
@@ -1405,6 +1413,7 @@ D3D12GraphicsCommandList_DrawInstanced_Detour (
   //if (trigger_reshade)
   //{
   //}
+#endif
 
   return
     D3D12GraphicsCommandList_DrawInstanced_Original (
@@ -1424,6 +1433,7 @@ D3D12GraphicsCommandList_DrawIndexedInstanced_Detour (
 {
   SK_LOG_FIRST_CALL
 
+#ifdef D3D12_STATE_TRACK
   UINT size    = sizeof (bool);
   bool disable = false;
 
@@ -1443,6 +1453,7 @@ D3D12GraphicsCommandList_DrawIndexedInstanced_Detour (
       //return;
     }
   }
+#endif
 
   return
     D3D12GraphicsCommandList_DrawIndexedInstanced_Original (
@@ -1486,6 +1497,7 @@ D3D12GraphicsCommandList_ExecuteIndirect_Detour (
 {
   SK_LOG_FIRST_CALL
 
+#ifdef D3D12_STATE_TRACK
   UINT size    = sizeof (bool);
   bool disable = false;
 
@@ -1505,6 +1517,7 @@ D3D12GraphicsCommandList_ExecuteIndirect_Detour (
       //return;
     }
   }
+#endif
 
   return
     D3D12GraphicsCommandList_ExecuteIndirect_Original (
@@ -2453,10 +2466,12 @@ SK_D3D12_RenderCtx::present (IDXGISwapChain3 *pSwapChain)
       _InitCopyTextureRegionHook (pCommandList)
     );
 
+#ifdef D3D12_STATE_TRACK
     // Don't let user disable HDR re-processing
     bool                                                                          _enable = false;
     pHDRPipeline->SetPrivateData (SKID_D3D12DisablePipelineState, sizeof (bool), &_enable);
     SK_RunOnce (_criticalVertexShaders.insert (pHDRPipeline));
+#endif
 
 
     HDR_LUMINANCE

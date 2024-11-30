@@ -1,4 +1,202 @@
-﻿24.11.21
+﻿24.11.30.3
+==========
+ + Properly remove Adaptive Trigger force feedback when impulse vibration stops
+
+24.11.30.2
+==========
+ + Implement PlayStation Adaptive Trigger support for DualSense controllers
+     connected using Bluetooth.
+
+24.11.30.1
+==========
+ + Bring back original slUpgradeInterface / slGetNativeInterface implementation
+     that could handle situations where sl.interposer.dll is loaded late.
+ + Increase default impulse trigger strength modifier to 0.75x, and properly
+     handle the case where setVibration (...) has zero trigger data.
+
+24.11.30
+========
+ + For all Unreal Engine games that use GameInput, enable Xbox Emulation by
+     default on first launch.
+ + Implement Adaptive Trigger response for GameInput Impulse Trigger emulation,
+     shooting guns and stabbing stuff in STALKER 2 now has Force Feedback that
+       would otherwise be Xbox exclusive!
+
+24.11.29.5
+==========
+ + Enable XInput emulation by default in STALKER 2
+
+24.11.29.4
+==========
+ + Ensure that "LowSpecMode" is enabled even for Metaphor: ReFantazio users with
+     texture mods installer, and change the auto-disable feature to only apply
+       when staging texture cache is enabled.
+ + Disable deferred context isolation in Metaphor by default for performance,
+     re-enable it if you need live texture modding or hudless screenshots.
+ + Improved thread interlocking for XInput rumble
+
+24.11.29.3
+==========
+ + Make Impulse Trigger Str. (Left/Right) configruable from SK's control panel.
+ + Correctly clear rumble when games pass a nullptr to SetRumbleState (...).
+
+24.11.29.2
+==========
+ + Added preliminary Xbox Impulse Triggers -> DualSense Haptics, in STALKER 2;
+     think of it more as supplementary rumble for the time being.
+
+   It does give a sensation you wouldn't get from just the 2 normal high/low
+     frequency rumble motors (or emulated motors in DualSense's case), but it
+       is not as advanced as actual haptic effects or Force Feedback Triggers.
+
+   I think a combination of the two could possibly create a convincing feeling,
+     but haven't had time to implement the various force feedback effect types
+       yet.
+
+24.11.29.1
+==========
+ + Avoid memory move in SK_Exception_HandleThreadName (...) when assigning
+     wide character name, explicitly copy the string.
+
+24.11.29
+========
+ + Stop forcing latency waitable swapchains on in games that do not normally
+     use them unless SwapChainWait is set to a non-zero value in INI.
+ + Optimize NVIDIA Reflex timing marker code in D3D12 games to avoid a constant
+     check for sl.interposer.dll.
+
+24.11.28.7
+==========
+ + Adjust Unreal Engine thread priorities for reduced stutter.
+ + Disable OpenGL and D3D9 hooks in ReShade is loaded as dxgi.dll or d3d12.dll,
+     in order to speed initialization up and reduce the chances of hook races.
+
+24.11.28.6
+==========
+ + Fix potential crash on non-Latency Waitable D3D12 SwapChains when SK
+     attempts to query the device latency from the D3D12 Device's DXGI Device.
+ + Remove Latency Waitable status from S.T.A.L.K.E.R. 2's SwapChain to help
+     reduce stutter slightly.
+
+24.11.28.5
+==========
+ + Implemented PlayStation->GameInput translation for DualShock 3/4 and
+     DualSense controllers over USB and Bluetooth (DS4/DualSense only).
+ + Removed warning about needing DS4Windows in GameInput games.
+
+24.11.28.4
+==========
+ + Implement haptic/rumble blocking support for GameInput; S.T.A.L.K.E.R. 2
+     uses impulse triggers, so next step is to translate those to DualSense.
+
+24.11.28.3
+==========
+ + Remove warning for ReShade loaded as dxgi.dll/d3d12.dll in D3D12 games;
+     it's still not a fully compatible combination, but the UI will at least
+       work (no SK Add-On releated features will).
+
+24.11.28.2
+==========
+ + Add 1 frame delay before returning GAMEINPUT_E_READING_NOT_FOUND when
+     initiating GameInput device blocking, so that the game will first read
+        safe neutralized input values.
+        
+          (i.e. you don't keep running forward when the control panel opens).
+
+24.11.28.1
+==========
+ + Improved gamepad input blocking when using GameInput
+ + Wrapped IGameInputReading in order to implement PlayStation->GameInput
+     translation (not complete).
+
+24.11.28
+========
+ + Added initial support for GameInput; that means activity indicators in the
+     active Input API section of the control panel and blocking device classes
+       when SK's control panel is open or devices are enabled/disabled.
+ + Currently Special K cannot emulate GameInput for PlayStation controllers,
+
+   >> You must use DS4Windows to play games such as STALKER2 using a DualShock
+        or DualSense controller.
+
+    * Emulation support is planned, but the API is new to me and there is only
+        one known game that uses the API at the moment :)
+
+24.11.27
+========
+ + Adjusted Tomb Raider Remastered (OpenGL)'s default settings to use 8-bpc
+     instead of 10-bpc, because the game is sRGB.
+
+24.11.25
+========
+ + Disable the option to clear Flip Model backbuffers on present by default,
+     because it prevents OBS Game Capture in some (D3D11) scenarios.
+
+24.11.24.2
+==========
+ + Allow moving windows to different monitors by dragging without triggering
+     SK's monitor-change message (causes games to maximize the game window).
+
+24.11.24.1
+==========
+ + Fixed accidentally using ImGuiKey_MouseLeft to index the ImGuiIO::MouseDown
+     array (which only has 5 buttons; the value of ImGuiKey_MouseLeft is 653!)
+   * It should have been ImGuiIO::AddMouseButtonEvent (ImGuiKey_MouseLeft,...).
+  >> This relatively new bug only affected games w/ (Low-Level) Mouse Hooks...
+
+ + Ignore mouse button capture when the mouse cursor is over a non-client part
+     of a game window (i.e. title bar or resize grips).
+ + Disengage the "confine cursor" option temporarily while a game window has
+     been grabbed and is inside of the "size/move" modal loop, so that the
+       window can actually be resized or repositioned without interference.
+
+24.11.24
+========
+ + Unload plug-in DLLs at game exit _before_ uninstalling all hooked functions.
+ + Add plug-in DLL names to the unload log entires during game shutdown.
+ + Run each plug-in unload attempt within its own exception handler and
+     continue unloading remaining plug-ins if there is an exception.
+
+24.11.23.2
+==========
+ + Fixed the issue in 24.11.23.1 the correct way :) The staging copy of the
+     backbuffer needs to be enqueued, the reference to the backbuffer released,
+       and the command queue flushed immediately and then there are no chances
+         for the swapchain backbuffers to have outstanding references.
+
+24.11.23.1
+==========
+ + Fixed D3D11 screenshots occasionally causing display mode changes to fail if
+     a (Blt Model) game requested a mode change within 500-ms of the last screen
+       capture.
+
+24.11.23
+========
+ + Cleaned-up Mouse Cursor section of Input Control Panel and removed the old
+     "Low-Level Mouse Settings" section.
+
+ + Auto-Bluetooth Compatibility now only powers off PlayStation controllers
+     that have advanced Bluetooth mode active if SK has seen the game attempt
+       to poll input using WinMM or DirectInput 7/8 at least one time first.
+
+    # Controllers start in "simple" Bluetooth mode when initially powered on,
+        which is a mode compatible with DirectInput and WinMM.
+
+   >> Prior to this change, it could cause an endless loop of the controller
+        powering off, Steam Input re-initializing the controller in advanced
+          Bluetooth mode when powered back on, and then SK turning it back off!
+
+    * It is a niche feature that is more likely to be accidentally enabled by
+        users not completely familiar with its purpose than the chances of
+          playing a game that requires it.
+
+24.11.22
+========
+ + Update ReShade Add-on API headers to include new events in the next release.
+ + Reduce unnecessary WM_NCHITTEST messages sent to games when the cursor is not
+     even moving.
+
+24.11.21
 ========
  + Enable Fake Fullscreen mode by default in STALKER 2, because it uses that
      crap (in D3D12) for HDR... yay!

@@ -450,7 +450,7 @@ SK_LoadEarlyImports64 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Early Custom Import %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Early Custom Import %s... ",
               file.m_pData);
 
             if (! blacklisted)
@@ -467,7 +467,7 @@ SK_LoadEarlyImports64 (void)
                     SK_GetModuleFullName ( import.hLibrary ).c_str ()
                   );
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 if (import.role->is_equal (SK_IMPORT_ROLE_PLUGIN)) {
@@ -483,7 +483,7 @@ SK_LoadEarlyImports64 (void)
                 _com_error err (HRESULT_FROM_WIN32 (GetLastError ()));
 
                 import.hLibrary = (HMODULE)-2;
-                dll_log->LogEx (false, L"failed: 0x%04X (%s)!\n",
+                dll_log->Log (L"LoadLibrary failed: 0x%04X (%s)!\n",
                                 err.WCode (), err.ErrorMessage () );
               }
             }
@@ -534,7 +534,7 @@ SK_LoadPlugIns64 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Special K Plug-In %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Special K Plug-In %s... ",
               file.m_pData);
 
             if (! blacklisted)
@@ -546,7 +546,7 @@ SK_LoadPlugIns64 (void)
                 if (SK_Import_GetShimmedLibrary (import.hLibrary, import.hShim))
                   std::swap (import.hLibrary, import.hShim);
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 import.product_desc =
@@ -619,7 +619,7 @@ SK_LoadLateImports64 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Late Custom Import %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Late Custom Import %s... ",
               file.m_pData);
 
             if (! blacklisted)
@@ -631,7 +631,7 @@ SK_LoadLateImports64 (void)
                 if (SK_Import_GetShimmedLibrary (import.hLibrary, import.hShim))
                   std::swap (import.hLibrary, import.hShim);
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 import.product_desc =
@@ -645,14 +645,14 @@ SK_LoadLateImports64 (void)
                 _com_error err (HRESULT_FROM_WIN32 (GetLastError ()));
 
                 import.hLibrary = (HMODULE)-2;
-                dll_log->LogEx (false, L"failed: 0x%04X (%s)!\n",
+                dll_log->Log (L"LoadLibrary failed: 0x%04X (%s)!\n",
                                err.WCode (), err.ErrorMessage () );
               }
             }
 
             else
             {
-              dll_log->LogEx (false, L"failed: Host App is Blacklisted!\n");
+              dll_log->Log (L"LoadLibrary failed: Host App is Blacklisted!\n");
             }
           }
         }
@@ -696,7 +696,7 @@ SK_LoadLazyImports64 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Lazy Custom Import %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Lazy Custom Import %s... ",
                 file.m_pData);
 
             if (! blacklisted)
@@ -708,7 +708,7 @@ SK_LoadLazyImports64 (void)
                 if (SK_Import_GetShimmedLibrary (import.hLibrary, import.hShim))
                   std::swap (import.hLibrary, import.hShim);
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 import.product_desc =
@@ -722,14 +722,14 @@ SK_LoadLazyImports64 (void)
                 _com_error err (HRESULT_FROM_WIN32 (GetLastError ()));
 
                 import.hLibrary = (HMODULE)-3;
-                dll_log->LogEx (false, L"failed: 0x%04X (%s)!\n",
+                dll_log->Log (L"LoadLibrary failed: 0x%04X (%s)!\n",
                                 err.WCode (), err.ErrorMessage () );
               }
             }
 
             else
             {
-              dll_log->LogEx (false, L"failed: Host App is Blacklisted!\n");
+              dll_log->Log (L"LoadLibrary failed: Host App is Blacklisted!\n");
             }
           }
         }
@@ -816,7 +816,7 @@ SK_LoadEarlyImports32 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Early Custom Import %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Early Custom Import %s... ",
               file.m_pData);
 
             if (! blacklisted)
@@ -828,7 +828,7 @@ SK_LoadEarlyImports32 (void)
                 if (SK_Import_GetShimmedLibrary (import.hLibrary, import.hShim))
                   std::swap (import.hLibrary, import.hShim);
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 import.product_desc =
@@ -850,14 +850,14 @@ SK_LoadEarlyImports32 (void)
                 _com_error err (HRESULT_FROM_WIN32 (GetLastError ()));
 
                 import.hLibrary = (HMODULE)-2;
-                dll_log->LogEx (false, L"failed: 0x%04X (%s)!\n",
+                dll_log->Log (L"LoadLibrary failed: 0x%04X (%s)!\n",
                                 err.WCode (), err.ErrorMessage () );
               }
             }
 
             else
             {
-              dll_log->LogEx (false, L"failed: Host App is Blacklisted!\n");
+              dll_log->Log (L"LoadLibrary failed: Host App is Blacklisted!\n");
             }
           }
         }
@@ -901,7 +901,7 @@ SK_LoadPlugIns32 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Special K Plug-In %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Special K Plug-In %s... ",
               file.m_pData);
 
             if (! blacklisted)
@@ -913,7 +913,7 @@ SK_LoadPlugIns32 (void)
                 if (SK_Import_GetShimmedLibrary (import.hLibrary, import.hShim))
                   std::swap (import.hLibrary, import.hShim);
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 import.product_desc =
@@ -986,7 +986,7 @@ SK_LoadLateImports32 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Late Custom Import %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Late Custom Import %s... ",
               file.m_pData);
 
             if (! blacklisted)
@@ -998,7 +998,7 @@ SK_LoadLateImports32 (void)
                 if (SK_Import_GetShimmedLibrary (import.hLibrary, import.hShim))
                   std::swap (import.hLibrary, import.hShim);
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 import.product_desc =
@@ -1012,14 +1012,14 @@ SK_LoadLateImports32 (void)
                 _com_error err (HRESULT_FROM_WIN32 (GetLastError ()));
 
                 import.hLibrary = (HMODULE)-2;
-                dll_log->LogEx (false, L"failed: 0x%04X (%s)!\n",
+                dll_log->Log (L"LoadLibrary failed: 0x%04X (%s)!\n",
                                 err.WCode (), err.ErrorMessage () );
               }
             }
 
             else
             {
-              dll_log->LogEx (false, L"failed: Host App is Blacklisted!\n");
+              dll_log->Log (L"LoadLibrary failed: Host App is Blacklisted!\n");
             }
           }
         }
@@ -1063,7 +1063,7 @@ SK_LoadLazyImports32 (void)
 
             SK_StripUserNameFromPathW (file);
 
-            dll_log->LogEx (true, L"[ SpecialK ]  * Loading Lazy Custom Import %s... ",
+            dll_log->Log (L"[ SpecialK ]  * Loading Lazy Custom Import %s... ",
                 file.m_pData);
 
             if (! blacklisted)
@@ -1075,7 +1075,7 @@ SK_LoadLazyImports32 (void)
                 if (SK_Import_GetShimmedLibrary (import.hLibrary, import.hShim))
                   std::swap (import.hLibrary, import.hShim);
 
-                dll_log->LogEx (false, L"success!\n");
+                //dll_log->LogEx (false, L"success!\n");
                 ++success;
 
                 import.product_desc =
@@ -1089,14 +1089,14 @@ SK_LoadLazyImports32 (void)
                 _com_error err (HRESULT_FROM_WIN32 (GetLastError ()));
 
                 import.hLibrary = (HMODULE)-3;
-                dll_log->LogEx (false, L"failed: 0x%04X (%s)!\n",
+                dll_log->Log (L"LoadLibrary failed: 0x%04X (%s)!\n",
                                 err.WCode (), err.ErrorMessage () );
               }
             }
 
             else
             {
-              dll_log->LogEx (false, L"failed: Host App is Blacklisted!\n");
+              dll_log->Log (L"LoadLibrary failed: Host App is Blacklisted!\n");
               import.hLibrary = (HMODULE)-3;
             }
           }
@@ -1121,16 +1121,16 @@ SK_LogLastErr (void)
 void
 SK_UnloadImports (void)
 {
-  auto orig_se =
-  SK_SEH_ApplyTranslator (
-    SK_FilteringStructuredExceptionTranslator (
-      EXCEPTION_ACCESS_VIOLATION
-    )
-  );
-  try {
-    // Unload in reverse order, because that's safer :)
-    for (int i = SK_MAX_IMPORTS - 1; i >= 0; i--)
-    {
+  // Unload in reverse order, because that's safer :)
+  for (int i = SK_MAX_IMPORTS - 1; i >= 0; i--)
+  {
+    auto orig_se =
+    SK_SEH_ApplyTranslator (
+      SK_FilteringStructuredExceptionTranslator (
+        EXCEPTION_ACCESS_VIOLATION
+      )
+    );
+    try {
       auto& import =
         imports->imports [i];
 
@@ -1156,7 +1156,7 @@ SK_UnloadImports (void)
           if (SKPlugIn_Shutdown != nullptr)
               SKPlugIn_Shutdown   (nullptr);
         }
-
+    
         ///dll_log.Log ( L"[ SpecialK ] Unloading Custom Import %s...",
         ///              import.filename->get_value_str ().c_str () );
 
@@ -1165,8 +1165,8 @@ SK_UnloadImports (void)
                                          SK_FreeLibrary (import.hLibrary) )
         {
           dll_log->LogEx ( false,
-                           L"-------------------------[ Free Lib ]                "
-                           L"                           success! (%4u ms)\n",
+                           L"-------------------------[ Free Lib ] %41ws"
+                           L" success! (%4u ms)\n", import.name.c_str (),
                              SK_timeGetTime ( ) - dwTime );
         }
 
@@ -1176,11 +1176,16 @@ SK_UnloadImports (void)
         }
       }
     }
-  }
 
-  catch (const SK_SEH_IgnoredException&)
-  { }
-  SK_SEH_RemoveTranslator (orig_se);
+    catch (const SK_SEH_IgnoredException&)
+    {
+      dll_log->Log (
+        L"Structured Exception encountered while unloading library: %ws!",
+          imports->imports [i].name.c_str ()
+      );
+    }
+    SK_SEH_RemoveTranslator (orig_se);
+  }
 }
 
 

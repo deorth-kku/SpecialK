@@ -701,7 +701,11 @@ void SK_SEH_InitFinishCallback (void)
   {
     if (! (SK_GetDLLRole () & DLL_ROLE::DXGI))
       SK::DXGI::StartBudgetThread_NoAdapter ();
-
+  }__except(GetExceptionCode()==EXCEPTION_WINE_STUB      ?
+                                EXCEPTION_EXECUTE_HANDLER:
+                                EXCEPTION_CONTINUE_SEARCH){ }
+  __try
+  {
     static const GUID  nil_guid = {     };
                  GUID* pGUID    = nullptr;
 
@@ -721,14 +725,15 @@ void SK_SEH_InitFinishCallback (void)
     {
       PowerSetActiveScheme (nullptr, &config.cpu.power_scheme_guid);
     }
-
+  }__except(GetExceptionCode()==EXCEPTION_WINE_STUB      ?
+                                EXCEPTION_EXECUTE_HANDLER:
+                                EXCEPTION_CONTINUE_SEARCH){ }
+  __try
+  {
     SK_LoadGPUVendorAPIs ();
-  }
-
-  __except ( GetExceptionCode () == EXCEPTION_WINE_STUB       ?
-                                    EXCEPTION_EXECUTE_HANDLER :
-                                    EXCEPTION_CONTINUE_SEARCH )
-  { }
+  }__except(GetExceptionCode()==EXCEPTION_WINE_STUB      ?
+                                EXCEPTION_EXECUTE_HANDLER:
+                                EXCEPTION_CONTINUE_SEARCH){ }
 }
 
 void
@@ -2879,8 +2884,7 @@ __stdcall
 SK_ShutdownCore (const wchar_t* backend)
 {
   SK_Inject_BroadcastExitNotify ();
-
-  SK_DisableApplyQueuedHooks ();
+  SK_DisableApplyQueuedHooks    ();
 
   if (        __SK_DLL_TeardownEvent != nullptr)
     SetEvent (__SK_DLL_TeardownEvent);
@@ -3139,29 +3143,22 @@ SK_ShutdownCore (const wchar_t* backend)
       dll_log->LogEx           (false, L"done! (%4u ms)\n", SK_timeGetTime () - dwTime);
     }
 
+    // Unload imports before shutting down MinHook
+    SK_UnloadImports           ();
+
     dll_log->LogEx             (true, L"[ SpecialK ] Shutting down MinHook...                     ");
 
     dwTime = SK_timeGetTime    ();
     SK_MinHook_UnInit          ();
     dll_log->LogEx             (false, L"done! (%4u ms)\n", SK_timeGetTime () - dwTime);
 
-    LoadLibraryW_Original   = nullptr;
-    LoadLibraryA_Original   = nullptr;
-    LoadLibraryExA_Original = nullptr;
-    LoadLibraryExW_Original = nullptr;
-    FreeLibrary_Original    = nullptr;
-    SleepEx_Original        = nullptr;
-
-    // ... Many, many more...
-
     dll_log->LogEx             (true, L"[ SpecialK ] Closing secondary logs...                    ");
 
     dwTime = SK_timeGetTime    ();
     SK_Log_CleanupLogs         ();
+    SK_ReShadeAddOn_CleanupConfigAndLogs
+                               ();
     dll_log->LogEx             (false, L"done! (%4u ms)\n", SK_timeGetTime () - dwTime);
-    SK_UnloadImports           ();
-
-    SK_ReShadeAddOn_CleanupConfigAndLogs ();
   }
 
 
@@ -3857,6 +3854,7 @@ SK_BackgroundRender_EndFrame (void)
 
     static bool last_foreground = false;
 
+    static const
     DWORD     dwProcessId = GetCurrentProcessId ();
     DWORD dwForegroundPid = 0x0;
     DWORD dwForegroundTid = 0x0;
@@ -3913,19 +3911,19 @@ SK_BackgroundRender_EndFrame (void)
       if ((! std::exchange (last_foreground, true)) && (config.window.always_on_top >= AlwaysOnTop || implicit_smart_always_on_top))
         SK_DeferCommand ("Window.TopMost true");
     }
-  }
 
-  if (SK_GetForegroundWindow () != game_window.hWnd)
-  {
-    //
-    // If SKIF is in the foreground, and SK is set to background render mode,
-    //   then post a message to SKIF to keep it drawing constantly so that VRR
-    //     in the game does not disengage.
-    //
-    //  The minor overhead from SKIF drawing constantly is much less than the
-    //    performance oddities caused by the game periodically losing DirectFlip.
-    //
-    SK_Inject_PostHeartbeatToSKIF ();
+    if (hForegroundWnd != game_window.hWnd)
+    {
+      //
+      // If SKIF is in the foreground, and SK is set to background render mode,
+      //   then post a message to SKIF to keep it drawing constantly so that VRR
+      //     in the game does not disengage.
+      //
+      //  The minor overhead from SKIF drawing constantly is much less than the
+      //    performance oddities caused by the game periodically losing DirectFlip.
+      //
+      SK_Inject_PostHeartbeatToSKIF ();
+    }
   }
 }
 
@@ -4411,6 +4409,13 @@ SK_EndBufferSwap (HRESULT hr, IUnknown* device, SK_TLS* pTLS)
 
   void SK_ImGui_DrawGraph_Latency (bool predraw);
        SK_ImGui_DrawGraph_Latency (true);
+
+  // While in the size/move modal loop, continually evaluate
+  //   window size/position and unrestrict the mouse.
+  if (game_window.size_move)
+  {
+    SK_Window_RepositionIfNeeded ();
+  }
 
   return hr;
 }

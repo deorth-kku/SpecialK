@@ -53,6 +53,32 @@ static constexpr int SK_MAX_WINDOW_DIM = 16384;
 # define SK_WINDOW_LOG_CALL_UNTESTED() { }
 #endif
 
+using  SetWindowDisplayAffinity_pfn = BOOL (WINAPI *)(HWND,DWORD);
+static SetWindowDisplayAffinity_pfn
+       SetWindowDisplayAffinity_Original = nullptr;
+
+BOOL
+WINAPI
+SetWindowDisplayAffinity_Detour (
+  _In_ HWND  hWnd,
+  _In_ DWORD dwAffinity )
+{
+  SK_LOG_FIRST_CALL
+
+  if (dwAffinity != WDA_NONE)
+  {
+    SK_LOGi0 (
+      L"SetWindowDisplayAffinity (...) called with dwAffinity = %x on HWND %x",
+        dwAffinity, hWnd
+    );
+  }
+
+  dwAffinity = WDA_NONE;
+
+  return
+    SetWindowDisplayAffinity_Original (hWnd, dwAffinity);
+}
+
 BOOL
 WINAPI
 SetWindowPlacement_Detour (
@@ -3518,8 +3544,10 @@ SK_Window_RepositionIfNeeded (void)
 
           SK_RunOnce (rb.updateOutputTopology ());
 
-          HMONITOR hMonitorBeforeRepos =
-            MonitorFromWindow (game_window.hWnd, MONITOR_DEFAULTTONEAREST);
+          bool move_monitors = rb.monitor != rb.next_monitor && rb.next_monitor != 0;
+
+          //HMONITOR hMonitorBeforeRepos =
+          //  MonitorFromWindow (game_window.hWnd, MONITOR_DEFAULTTONEAREST);
 
           if (! rb.isTrueFullscreen ())
           {
@@ -3619,17 +3647,21 @@ SK_Window_RepositionIfNeeded (void)
             SK_Display_ResolutionSelectUI (true);
             rb.gsync_state.update         (true);
 
+            // We programatically moved the window to a different monitor, so we need to
+            //   send the game a few messages to get the SwapChain to be owned by that
+            //     monitor...
+            if (move_monitors || !config.display.monitor_path_ccd.empty ())
             // This generally helps (Unity engine games mostly) to apply SwapChain overrides
             //   immediately, but ATLUS games will respond by moving the game back to the primary
             //     monitor...
-            //if (rb.windows.unity || rb.windows.sdl || rb.windows.unreal)
-            if (hMonitorBeforeRepos != rb.monitor && (! rb.windows.atlus))
             {
+              if (config.compatibility.allow_fake_size)
               PostMessage ( game_window.hWnd,                 WM_SIZE,        SIZE_RESTORED,
                 MAKELPARAM (game_window.actual.client.right -
                             game_window.actual.client.left,   game_window.actual.client.bottom -
                                                               game_window.actual.client.top )
                           );
+              if (config.compatibility.allow_fake_displaychange)
               PostMessage ( game_window.hWnd,                 WM_DISPLAYCHANGE, 32,
                 MAKELPARAM (game_window.actual.client.right -
                             game_window.actual.client.left,   game_window.actual.client.bottom -
@@ -3664,6 +3696,12 @@ SK_Window_RepositionIfNeeded (void)
 void
 SK_AdjustClipRect (void)
 {
+  if (game_window.size_move)
+  {
+    SK_ClipCursor (nullptr);
+    return;
+  }
+
   // Post-Process Results:
   //
   //  If window is moved as a result of this function, we need to:
@@ -5719,6 +5757,14 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
       }
     } break;
 
+    case WM_GETMINMAXINFO:
+      return 0;
+
+    case WM_ENTERSIZEMOVE:
+    case WM_EXITSIZEMOVE:
+      ImGui_WndProcHandler (hWnd, uMsg, wParam, lParam);
+      break;
+
     case WM_MOUSEMOVE:
       //if (hWnd == game_window.hWnd || hWnd == game_window.child)
       {
@@ -5751,12 +5797,11 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
 
     case WM_SETCURSOR:
     {
-      if ((hWnd == game_window.hWnd || hWnd == game_window.child) && HIWORD (lParam) != WM_NULL)
+      if (hWnd == game_window.hWnd && HIWORD (lParam) != WM_NULL)
       {
-        if ( LOWORD (lParam) == HTCLIENT ||
-             LOWORD (lParam) == HTTRANSPARENT )
+        if (LOWORD (lParam) == HTCLIENT)
         {
-          if (ImGui_WndProcHandler (hWnd, uMsg, wParam, lParam) != 0 && (ImGui::GetIO ().WantCaptureMouse || SK_ImGui_IsAnythingHovered ()))
+          if (ImGui_WndProcHandler (hWnd, uMsg, wParam, lParam) != 0 && (SK_ImGui_IsAnythingHovered () || SK_ImGui_WantMouseButtonCapture ()))
           {
             const bool bOrig =
               std::exchange (__SK_EnableSetCursor, true);
@@ -5981,7 +6026,7 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
 
           ActivateWindow (hWnd, true);
 
-          if (! SK_ImGui_WantMouseCapture ())
+          if (! SK_ImGui_WantMouseButtonCapture ())
             return MA_ACTIVATE;       // We don't want it, and the game doesn't expect it
           else
             return MA_ACTIVATEANDEAT; // We want it, game doesn't need it
@@ -6021,7 +6066,7 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
                           L"Window Mgr" );
 
             ActivateWindow (hWnd, true);
-        
+
             if (SK_WantBackgroundRender ())
               SK_DetourWindowProc ( hWnd, WM_SETFOCUS, (WPARAM)nullptr, (LPARAM)nullptr );
           }
@@ -6038,10 +6083,6 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
             {
               game_window.DefWindowProc ( hWnd, uMsg,
                                             wParam, lParam );
-
-              ////SK_COMPAT_SafeCallProc (&game_window,
-              ////  hWnd, uMsg, TRUE, lParam
-              ////);
 
               SK_DetourWindowProc ( hWnd, WM_KILLFOCUS, (WPARAM)nullptr, (LPARAM)nullptr );
 
@@ -6076,10 +6117,6 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
               game_window.DefWindowProc ( hWnd, uMsg,
                                             wParam, lParam );
 
-              //SK_COMPAT_SafeCallProc (&game_window,
-              //  hWnd, uMsg, TRUE, 0
-              //);
-
               SK_DetourWindowProc ( hWnd, WM_KILLFOCUS, (WPARAM)nullptr, (LPARAM)nullptr );
 
               return 0;
@@ -6088,7 +6125,7 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
 
           else if (SK_WantBackgroundRender ())
           {
-            ActivateWindow (hWnd, true);
+            ActivateWindow      ( hWnd, true );
             SK_DetourWindowProc ( hWnd, WM_SETFOCUS, (WPARAM)nullptr, (LPARAM)nullptr );
           }
         }
@@ -6119,11 +6156,12 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
           } break;
         }
 
-        if (last_active)
+        if (game_window.active)
         {
           if (! activate)
           {
-            ActivateWindow (hWnd, activate);
+            if (! (! rb.isTrueFullscreen ()) && SK_WantBackgroundRender () )
+              ActivateWindow (hWnd, activate);
 
             SK_LOG2 ( ( L"Application Deactivated %s", source ),
                         L"Window Mgr" );
@@ -6146,12 +6184,9 @@ SK_DetourWindowProc ( _In_  HWND   hWnd,
           if (! activate)
           {
             game_window.DefWindowProc ( hWnd, uMsg,
-                                        wParam, lParam );
+                                          wParam, lParam );
 
-            SK_DetourWindowProc ( hWnd, WM_KILLFOCUS, (WPARAM)nullptr, (LPARAM)nullptr );
-            ActivateWindow      ( hWnd, false );
-
-            return 1;
+            return 0;
           }
 
           else
@@ -7283,6 +7318,10 @@ SK_MakeWindowHook (WNDPROC class_proc, WNDPROC wnd_proc, HWND hWnd)
   }
 
 
+  if ( SetWindowDisplayAffinity_Original != nullptr)
+       SetWindowDisplayAffinity_Original (game_window.hWnd, WDA_NONE);
+  else SetWindowDisplayAffinity          (game_window.hWnd, WDA_NONE);
+
   dll_log->Log ( L"[Window Mgr] Hooking the Window Procedure for "
                  L"%s Window Class ('%s' - \"%s\" * %x)",
                  game_window.unicode ? L"Unicode" : L"ANSI",
@@ -7454,7 +7493,9 @@ SK_MakeWindowHook (WNDPROC class_proc, WNDPROC wnd_proc, HWND hWnd)
            SK_GetCurrentGameID () == SK_GAME_ID::Persona5 ||
            SK_GetCurrentGameID () == SK_GAME_ID::Persona5Strikers)
   {
-    SK_GetCurrentRenderBackend ().windows.atlus = true;
+    SK_GetCurrentRenderBackend ().windows.atlus   = true;
+    config.compatibility.allow_fake_displaychange = false;
+    config.compatibility.allow_fake_size          = false;
   }
 
 
@@ -7931,6 +7972,11 @@ SK_HookWinAPI (void)
                                 GetGUIThreadInfo_Detour,
        static_cast_p2p <void> (&GetGUIThreadInfo_Original) );
 
+    SK_CreateDLLHook2 (       L"user32",
+                               "SetWindowDisplayAffinity",
+                                SetWindowDisplayAffinity_Detour,
+       static_cast_p2p <void> (&SetWindowDisplayAffinity_Original) );
+
      GetWindowBand =
     (GetWindowBand_pfn)SK_GetProcAddress (L"user32.dll",
     "GetWindowBand");
@@ -8198,7 +8244,7 @@ WINAPI
 SK_ClipCursor (const RECT *lpRect)
 {
   // Do not allow cursor clipping when the game's window is inactive
-  if (! game_window.active)
+  if ((! game_window.active) || (game_window.size_move)) // Or being moved
     lpRect = nullptr;
 
   return

@@ -44,47 +44,22 @@ SHGetKnownFolderPath_Detour ( _In_     REFKNOWNFOLDERID              rfid,
                               _In_opt_ HANDLE                        hToken,
                               _Outptr_ PWSTR *                       ppszPath );
 
-using GetCommandLineW_pfn = LPWSTR (WINAPI *)(void);
-      GetCommandLineW_pfn
-      GetCommandLineW_Original    = nullptr;
+SHGetKnownFolderPath_pfn SHGetKnownFolderPath_Original = nullptr;
 
-using GetCommandLineA_pfn = LPSTR  (WINAPI *)(void);
-      GetCommandLineA_pfn
-      GetCommandLineA_Original    = nullptr;
+GetCommandLineW_pfn      GetCommandLineW_Original    = nullptr;
+GetCommandLineA_pfn      GetCommandLineA_Original    = nullptr;
 
-using TerminateThread_pfn = BOOL (WINAPI *)( _In_ HANDLE hThread,
-                                             _In_ DWORD  dwExitCode );
-      TerminateThread_pfn
-      TerminateThread_Original    = nullptr;
-
-using ExitThread_pfn = VOID (WINAPI *)(_In_ DWORD  dwExitCode);
-      ExitThread_pfn
-      ExitThread_Original         = nullptr;
-
-using _endthreadex_pfn = void (__cdecl *)( _In_ unsigned _ReturnCode );
-      _endthreadex_pfn
-      _endthreadex_Original       = nullptr;
-
-using NtTerminateProcess_pfn = NTSTATUS (*)(HANDLE, NTSTATUS);
-      NtTerminateProcess_pfn
-      NtTerminateProcess_Original = nullptr;
-
-using RtlExitUserThread_pfn = VOID (NTAPI *)(_In_ NTSTATUS 	Status);
-      RtlExitUserThread_pfn
-      RtlExitUserThread_Original  = nullptr;
-
-using SHGetKnownFolderPath_pfn = HRESULT (WINAPI *)(REFKNOWNFOLDERID,DWORD,HANDLE,PWSTR*);
-      SHGetKnownFolderPath_pfn
-      SHGetKnownFolderPath_Original = nullptr;
-
-using CloseHandle_pfn = BOOL (WINAPI *)(HANDLE);
-
-TerminateProcess_pfn   TerminateProcess_Original   = nullptr;
-ExitProcess_pfn        ExitProcess_Original        = nullptr;
-ExitProcess_pfn        ExitProcess_Hook            = nullptr;
-OutputDebugStringA_pfn OutputDebugStringA_Original = nullptr;
-OutputDebugStringW_pfn OutputDebugStringW_Original = nullptr;
-CloseHandle_pfn        CloseHandle_Original        = nullptr;
+NtTerminateProcess_pfn   NtTerminateProcess_Original = nullptr;
+RtlExitUserThread_pfn    RtlExitUserThread_Original  = nullptr;
+ExitThread_pfn           ExitThread_Original         = nullptr;
+_endthreadex_pfn         _endthreadex_Original       = nullptr;
+TerminateThread_pfn      TerminateThread_Original    = nullptr;
+TerminateProcess_pfn     TerminateProcess_Original   = nullptr;
+ExitProcess_pfn          ExitProcess_Original        = nullptr;
+ExitProcess_pfn          ExitProcess_Hook            = nullptr;
+OutputDebugStringA_pfn   OutputDebugStringA_Original = nullptr;
+OutputDebugStringW_pfn   OutputDebugStringW_Original = nullptr;
+CloseHandle_pfn          CloseHandle_Original        = nullptr;
 
 bool SK_SEH_CompatibleCallerName (LPCVOID lpAddr, wchar_t* wszDllFullName);\
 
@@ -188,13 +163,8 @@ static SymGetTypeInfo_pfn       SymGetTypeInfo_Imp       = nullptr;
 void
 SK_SymSetOpts (void);
 
-using SetLastError_pfn = void (WINAPI *)(_In_ DWORD dwErrCode);
-      SetLastError_pfn
-      SetLastError_Original = nullptr;
-
-using GetProcAddress_pfn = FARPROC (WINAPI *)(HMODULE,LPCSTR);
-      GetProcAddress_pfn
-      GetProcAddress_Original = nullptr;
+SetLastError_pfn SetLastError_Original = nullptr;
+GetProcAddress_pfn GetProcAddress_Original = nullptr;
 
 using LdrLockLoaderLock_pfn   = NTSTATUS (WINAPI *)(ULONG Flags, ULONG *State, ULONG_PTR *Cookie);
 using LdrUnlockLoaderLock_pfn = NTSTATUS (WINAPI *)(ULONG Flags,               ULONG_PTR  Cookie);
@@ -2075,10 +2045,10 @@ ZwSetInformationThread_Detour (
     {
       if (pTLS != nullptr) pTLS->debug.hidden = true;
 
-      SK_LOG0 ( ( L"tid=%x (%s) tried to hide itself from debuggers; please "
+      SK_LOG0 ( ( L"tid=%x (%ws) tried to hide itself from debuggers; please "
                   L"attach one and investigate!",
                   GetThreadId (ThreadHandle),
-            SK_Thread_GetName (ThreadHandle).c_str () ),
+            SK_Thread_GetName (ThreadHandle) ),
                   L"DieAntiDbg" );
     }
 
@@ -2243,8 +2213,7 @@ ZwCreateThreadEx_Detour (
     auto& ThreadNames =
      *_SK_ThreadNames;
 
-    if ( ThreadNames.find (tid) ==
-         ThreadNames.cend (   ) )
+    if (ThreadNames.count (tid) == 0)
     {
       ulLen =
         SK_GetSymbolNameFromModuleAddr (
@@ -2274,9 +2243,8 @@ ZwCreateThreadEx_Detour (
         thread_name       )
       );
 
-      ThreadNames.insert (
-        std::make_pair ( tid, thr_name )
-      );
+      wcsncpy_s (ThreadNames [tid].data (), SK_MAX_THREAD_NAME_LEN,
+                         thr_name.c_str (),             _TRUNCATE);
 
       SK_TLS* pTLS =
         SK_TLS_BottomEx (tid);
@@ -2284,7 +2252,7 @@ ZwCreateThreadEx_Detour (
       if (pTLS != nullptr)
       {
         wcsncpy_s (
-          pTLS->debug.name,          MAX_THREAD_NAME_LEN,
+          pTLS->debug.name,          SK_MAX_THREAD_NAME_LEN,
                   thr_name.c_str (), _TRUNCATE
         );
       }
@@ -2453,9 +2421,8 @@ NtCreateThreadEx_Detour (
         thread_name       )
       );
 
-      ThreadNames.insert (
-        std::make_pair ( tid, thr_name )
-      );
+      wcsncpy_s (ThreadNames [tid].data (), SK_MAX_THREAD_NAME_LEN,
+                         thr_name.c_str (),             _TRUNCATE);
 
       SK_TLS* pTLS =
         SK_TLS_BottomEx (tid);
@@ -2463,7 +2430,7 @@ NtCreateThreadEx_Detour (
       if (pTLS != nullptr)
       {
         wcsncpy_s (
-          pTLS->debug.name,          MAX_THREAD_NAME_LEN,
+          pTLS->debug.name,          SK_MAX_THREAD_NAME_LEN,
                   thr_name.c_str (), _TRUNCATE
         );
       }
@@ -2917,8 +2884,8 @@ SK_Exception_HandleThreadName (
 
     if (non_empty)
     {
-      static auto& ThreadNames = _SK_ThreadNames.get       ();
-      static auto& SelfTitled  = _SK_SelfTitledThreads.get ();
+      auto& ThreadNames = _SK_ThreadNames.get       ();
+      auto& SelfTitled  = _SK_SelfTitledThreads.get ();
 
       DWORD dwTid  =  ( info->dwThreadID != -1 ?
                         info->dwThreadID :
@@ -2933,20 +2900,23 @@ SK_Exception_HandleThreadName (
         SK_TLS_BottomEx (dwTid);
 
       std::wstring wide_name (
-        SK_UTF8ToWideChar (info->szName)
+        SK_UTF8ToWideChar (info->szName).c_str ()
       );
 
       if (pTLS != nullptr)
       {
         wcsncpy_s (
           pTLS->debug.name,
-          std::min (len+1, (size_t)MAX_THREAD_NAME_LEN-1),
+          std::min (len+1, (size_t)SK_MAX_THREAD_NAME_LEN-1),
           wide_name.c_str (),
           _TRUNCATE );
       }
 
-      ThreadNames [dwTid] =
-        wide_name;
+      // Do not move the string; truncate the string,
+      //   and replace any existing name with a copy!
+                *ThreadNames [dwTid].data () = L'\0';
+      wcsncpy_s (ThreadNames [dwTid].data (),SK_MAX_THREAD_NAME_LEN,
+                          wide_name.c_str (),            _TRUNCATE);
 
 #ifdef _M_AMD64
       if (SK_GetCurrentGameID () == SK_GAME_ID::EldenRing)

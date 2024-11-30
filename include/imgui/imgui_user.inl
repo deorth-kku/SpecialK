@@ -383,14 +383,16 @@ SK_ImGui_ProcessRawInput ( _In_      HRAWINPUT hRawInput,
         {
           case RIM_TYPEMOUSE:
           {
-            if (SK_ImGui_WantMouseCapture ())
+            //// Block mouse input to the game while it's in the background
+            if ((! foreground) && config.input.mouse.disabled_to_game == 2)
             {
               filter = true;
             }
 
-            // Block mouse input to the game while it's in the background
-            if (SK_WantBackgroundRender () && (! focus))
+            else if (SK_ImGui_WantMouseCapture ())
+            {
               filter = true;
+            }
 
             mouse = true;
 
@@ -415,62 +417,59 @@ SK_ImGui_ProcessRawInput ( _In_      HRAWINPUT hRawInput,
               (((RAWINPUT *)pData)->data.keyboard.VKey & 0xFF);
 
 
-            // Only filter keydown message, not key releases
-            if (SK_ImGui_WantKeyboardCapture ())
+            if (VKey & 0xF8) // Valid Keys:  8 - 255
             {
-              if (VKey & 0xF8) // Valid Keys:  8 - 255
-                filter = true;
+              keyboard = true;
             }
 
-
-            if (SK_ImGui_WantMouseCapture ())
+            // That's actually a mouse button...
+            else if (VKey < 7)
             {
-              // That's actually a mouse button...
-              if (foreground && VKey < 7)
+              mouse = true;
+
+              if (((! foreground) && config.input.mouse.disabled_to_game == 2) || SK_ImGui_WantMouseCapture ())
               {
-                if (((RAWINPUT *)pData)->data.keyboard.Message == WM_KEYDOWN)
-                  filter = true;
-
-                if (((RAWINPUT *)pData)->data.keyboard.Message == WM_SYSKEYDOWN)
-                  filter = true;
-
-                if (((RAWINPUT *)pData)->data.keyboard.Message == WM_KEYUP)
-                  filter = true;
-
-                if (((RAWINPUT *)pData)->data.keyboard.Message == WM_SYSKEYUP)
-                  filter = true;
+                switch (((RAWINPUT *)pData)->data.keyboard.Message)
+                {
+                  case WM_KEYDOWN:
+                  case WM_SYSKEYDOWN:
+                  case WM_KEYUP:
+                  case WM_SYSKEYUP:
+                    filter = true;
+                    break;
+                }
               }
             }
 
+            if (keyboard)
+            {
+              // Block keyboard input to the game while the console is active
+              if (pConsole->isVisible ())
+                filter = true;
 
-            // Block keyboard input to the game while the console is active
-            if (pConsole->isVisible () && (VKey & 0xFF) > 7)
-              filter = true;
+              // Block keyboard input to the game while it does not have keyboard focus
+              else if ((! focus))
+                filter = true;
 
-
-            // Block keyboard input to the game while it's in the background
-            if (SK_WantBackgroundRender () && (! focus))
-              filter = true;
-
-
-            if (VKey & 0xF8) // Valid Keys:  8 - 255
-              keyboard = true;
-
-            if (keyboard && ( SK_ImGui_WantKeyboardCapture () ||
-                                (((RAWINPUT *)pData)->data.keyboard.Message == WM_CHAR ||
-                                 ((RAWINPUT *)pData)->data.keyboard.Message == WM_SYSCHAR) ))
-              filter = true;
+              else if ( SK_ImGui_WantKeyboardCapture () ||
+                       (((RAWINPUT *)pData)->data.keyboard.Message == WM_CHAR ||
+                        ((RAWINPUT *)pData)->data.keyboard.Message == WM_SYSCHAR) )
+                filter = true;
+            }
 
 
             if ( (! already_processed)
                            && uiCommand == RID_INPUT )
             {
+              const auto type =
+                (keyboard ? sk_input_dev_type::Keyboard : sk_input_dev_type::Mouse);
+
               if (! filter)
               {
-                SK_RAWINPUT_READ (sk_input_dev_type::Keyboard)
-                SK_RAWINPUT_VIEW (sk_input_dev_type::Keyboard)
+                SK_RAWINPUT_READ (type)
+                SK_RAWINPUT_VIEW (type)
               }
-              else SK_RAWINPUT_HIDE (sk_input_dev_type::Keyboard)
+              else SK_RAWINPUT_HIDE (type)
             }
           } break;
 
@@ -514,23 +513,39 @@ SK_ImGui_ProcessRawInput ( _In_      HRAWINPUT hRawInput,
           if (self)
           {
             if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_LEFT_BUTTON_DOWN   )
-              io.MouseDown [0] = true;
+              io.AddMouseButtonEvent (ImGuiKey_MouseLeft,    true);
+            //if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_LEFT_BUTTON_UP     )
+            //  io.AddMouseButtonEvent (ImGuiKey_MouseLeft,   false);
             if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_RIGHT_BUTTON_DOWN  )
-              io.MouseDown [1] = true;
+              io.AddMouseButtonEvent (ImGuiKey_MouseRight,   true);
+            //if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_RIGHT_BUTTON_UP    )
+            //  io.AddMouseButtonEvent (ImGuiKey_MouseRight,  false);
             if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_MIDDLE_BUTTON_DOWN )
-              io.MouseDown [2] = true;
+              io.AddMouseButtonEvent (ImGuiKey_MouseMiddle,  true);
+            //if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_MIDDLE_BUTTON_UP   )
+            //  io.AddMouseButtonEvent (ImGuiKey_MouseMiddle, false);
             if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_BUTTON_4_DOWN      )
-              io.MouseDown [3] = true;
+              io.AddMouseButtonEvent (ImGuiKey_MouseX1,      true);
+            //if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_BUTTON_4_UP        )
+            //  io.AddMouseButtonEvent (ImGuiKey_MouseX1,     false);
             if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_BUTTON_5_DOWN      )
-              io.MouseDown [4] = true;
-          }
+              io.AddMouseButtonEvent (ImGuiKey_MouseX2,      true);
+            //if ( ((RAWINPUT *)pData)->data.mouse.ulButtons & RI_MOUSE_BUTTON_5_UP        )
+            //  io.AddMouseButtonEvent (ImGuiKey_MouseX2,     false);
 
-          if ( ((RAWINPUT *)pData)->data.mouse.usButtonFlags == RI_MOUSE_WHEEL && self   )
-          {
-            io.MouseWheel +=
-            ((float)(short)((RAWINPUT *)pData)->data.mouse.usButtonData) /
-             (float)WHEEL_DELTA;
+            if ( ((RAWINPUT *)pData)->data.mouse.usButtonFlags & RI_MOUSE_WHEEL )
+            {
+              io.AddMouseWheelEvent (0.0f,
+                ((float)(short)((RAWINPUT *)pData)->data.mouse.usButtonData) /
+                 (float)WHEEL_DELTA);
+            }
 
+            if ( ((RAWINPUT *)pData)->data.mouse.usButtonFlags & RI_MOUSE_HWHEEL )
+            {
+              io.AddMouseWheelEvent (
+                ((float)(short)((RAWINPUT *)pData)->data.mouse.usButtonData) /
+                 (float)WHEEL_DELTA, 0.0f);
+            }
           }
         }
       } break;
@@ -1044,6 +1059,15 @@ ImGui_WndProcHandler ( HWND   hWnd,   UINT   msg,
     {
       return
         SK_Input_DetermineMouseIdleState (&msg_);
+    }
+  }
+
+  if (msg == WM_ENTERSIZEMOVE || msg == WM_EXITSIZEMOVE)
+  {
+    if (hWnd == game_window.hWnd)
+    {
+      game_window.size_move = (msg == WM_ENTERSIZEMOVE);
+      SK_Window_RepositionIfNeeded ();
     }
   }
 
@@ -2276,57 +2300,63 @@ SK_ImGui_PollGamepad_EndFrame (XINPUT_STATE* pState)
     }
   }
 
+  static auto last_frame  = SK_GetFramesDrawn ();
   static bool last_haptic = false;
 
-  if (bUseGamepad && SK_ImGui_Active () && config.input.gamepad.haptic_ui && nav_usable)
+  auto this_frame = SK_GetFramesDrawn ();
+
+  if (std::exchange (last_frame, this_frame) != this_frame)
   {
-    ImGuiContext& g =
-      *GImGui;
-
-    static ImGuiID nav_id = 0;
-
-    if (g.NavId != nav_id)
+    if (bUseGamepad && SK_ImGui_Active () && config.input.gamepad.haptic_ui && nav_usable)
     {
-      if (haptic_events.PulseNav.end > static_cast <float> (SK::ControlPanel::current_time))
+      ImGuiContext& g =
+        *GImGui;
+
+      static ImGuiID nav_id = 0;
+
+      if (g.NavId != nav_id)
       {
-        haptic_events.PulseNav.end   += haptic_events.PulseNav.duration;
-        haptic_events.PulseNav.start += haptic_events.PulseNav.duration;
+        if (haptic_events.PulseNav.end > static_cast <float> (SK::ControlPanel::current_time))
+        {
+          haptic_events.PulseNav.end   += haptic_events.PulseNav.duration;
+          haptic_events.PulseNav.start += haptic_events.PulseNav.duration;
+        }
+
+        else
+        {
+          haptic_events.PulseNav.start = static_cast <float> (SK::ControlPanel::current_time);
+          haptic_events.PulseNav.end   = haptic_events.PulseNav.start +
+                                           haptic_events.PulseNav.duration;
+        }
       }
 
-      else
+      if (g.ActiveIdIsJustActivated)
       {
-        haptic_events.PulseNav.start = static_cast <float> (SK::ControlPanel::current_time);
-        haptic_events.PulseNav.end   = haptic_events.PulseNav.start +
-                                         haptic_events.PulseNav.duration;
+        haptic_events.PulseButton.start = static_cast <float> (SK::ControlPanel::current_time);
+        haptic_events.PulseButton.end   = haptic_events.PulseButton.start +
+                                            haptic_events.PulseButton.duration;
       }
-    }
 
-    if (g.ActiveIdIsJustActivated)
-    {
-      haptic_events.PulseButton.start = static_cast <float> (SK::ControlPanel::current_time);
-      haptic_events.PulseButton.end   = haptic_events.PulseButton.start +
-                                          haptic_events.PulseButton.duration;
-    }
-
-    SK_XInput_PulseController ( config.input.gamepad.xinput.ui_slot,
-                                  haptic_events.PulseTitle.run  () +
-                                  haptic_events.PulseButton.run () +
-                  std::min (0.4f, haptic_events.PulseNav.run ()),
+      SK_XInput_PulseController ( config.input.gamepad.xinput.ui_slot,
                                     haptic_events.PulseTitle.run  () +
                                     haptic_events.PulseButton.run () +
-                    std::min (0.4f, haptic_events.PulseNav.run    ()) );
+                    std::min (0.4f, haptic_events.PulseNav.run ()),
+                                      haptic_events.PulseTitle.run  () +
+                                      haptic_events.PulseButton.run () +
+                      std::min (0.4f, haptic_events.PulseNav.run    ()) );
 
-    nav_id = g.NavId;
+      nav_id = g.NavId;
 
-    last_haptic = true;
-  }
+      last_haptic = true;
+    }
 
-  else if (std::exchange (last_haptic, false))
-  {
-    // Clear haptics on the first frame after they're no longer relevant
-    SK_XInput_PulseController (
-      config.input.gamepad.xinput.ui_slot, 0.0f, 0.0f
-    );
+    else if (std::exchange (last_haptic, false))
+    {
+      // Clear haptics on the first frame after they're no longer relevant
+      SK_XInput_PulseController (
+        config.input.gamepad.xinput.ui_slot, 0.0f, 0.0f
+      );
+    }
   }
 
   if (bUseGamepad)
@@ -2895,11 +2925,13 @@ SK_ImGui_FallbackTrackMouseEvent (POINT& cursor_pos)
 
       else
       {
-        last.hWndTop    = game_window.hWnd;
-        last.cursor_pos =  cursor_pos;
+        last.hWndTop = game_window.hWnd;
       }
+
+      if (last.hWndTop == game_window.hWnd)
+          last.cursor_pos = cursor_pos;
     }
-  
+
     hWndTop =
       last.hWndTop;
 
@@ -3358,8 +3390,18 @@ SK_ImGui_User_NewFrame (void)
                                       hWndFocus   : hWndGame != hWndFocus ?
                                                     hWndGame              : nullptr;
 
+    static POINT last_cursor_pos;
+    static bool  last_fg_or_top;
+
     bool  bMouseIsForegroundOrTop = ( hWndForeground == hWndMouse0 ||
                                       hWndForeground == hWndMouse1 );
+                                      
+    if (std::exchange(last_cursor_pos.x,cursor_pos.x) == cursor_pos.x&&
+        std::exchange(last_cursor_pos.y,cursor_pos.y) == cursor_pos.y)
+    {
+      bMouseIsForegroundOrTop = last_fg_or_top;
+    }
+
     if (! bMouseIsForegroundOrTop)
     {
       const HWND hWndAtCursor =
@@ -3370,6 +3412,8 @@ SK_ImGui_User_NewFrame (void)
           hWndAtCursor == hWndMouse1 );
     }
 
+    last_fg_or_top = bMouseIsForegroundOrTop;
+
     if (bMouseIsForegroundOrTop)
     {
       SK_ImGui_Cursor.ScreenToLocal (&cursor_pos);
@@ -3377,8 +3421,8 @@ SK_ImGui_User_NewFrame (void)
       if ( cursor_pos.x != last_x ||
            cursor_pos.y != last_y )
       {
-        if ( abs (SK_ImGui_Cursor.pos.x - cursor_pos.x) > 3 ||
-             abs (SK_ImGui_Cursor.pos.y - cursor_pos.y) > 3 )
+        if ( abs (SK_ImGui_Cursor.pos.x - cursor_pos.x) > 0 ||
+             abs (SK_ImGui_Cursor.pos.y - cursor_pos.y) > 0 )
         {
           SK_ImGui_Cursor.pos = cursor_pos;
         }
@@ -3390,6 +3434,11 @@ SK_ImGui_User_NewFrame (void)
         io.MousePos.x = static_cast <float> (SK_ImGui_Cursor.pos.x);
         io.MousePos.y = static_cast <float> (SK_ImGui_Cursor.pos.y);
       }
+    }
+
+    else
+    {
+      game_window.mouse.inside = false;
     }
   }
 
@@ -3445,8 +3494,8 @@ SK_ImGui_User_NewFrame (void)
   //   regular mouse capture includes swallowing input for "Disabled to Game".
   bool bWantMouseCaptureForUI = SK_ImGui_WantMouseCaptureEx (0x0) && (anything_hovered || ImGui::IsPopupOpen (nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel));
 
-  if ( abs (last_x - SK_ImGui_Cursor.pos.x) > 3 ||
-       abs (last_y - SK_ImGui_Cursor.pos.y) > 3 ||
+  if ( abs (last_x - SK_ImGui_Cursor.pos.x) > 0 ||
+       abs (last_y - SK_ImGui_Cursor.pos.y) > 0 ||
             bWantMouseCaptureForUI )
   {
     SK_ImGui_Cursor.last_move = SK::ControlPanel::current_time;
@@ -3526,7 +3575,7 @@ SK_ImGui_User_NewFrame (void)
 
   if (! SK_ImGui_Cursor.idle)
   {
-    if (capture_mouse && anything_hovered)
+    if (capture_mouse && anything_hovered && (last_x != SK_ImGui_Cursor.pos.x || last_y != SK_ImGui_Cursor.pos.y))
     {
       SK_SendMsgSetCursor (ImGui_DesiredCursor ());
     }
@@ -3678,6 +3727,9 @@ SK_ImGui_User_NewFrame (void)
   SK_ImGui_WantMouseCapture    (true);
   SK_ImGui_WantGamepadCapture  (true);
   SK_IsGameWindowActive        (true);
+
+  SK_GetCursorPos                 (&cursor_pos);
+  SK_ImGui_Cursor.last_screen_pos = cursor_pos;
 }
 
 bool

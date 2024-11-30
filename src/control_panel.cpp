@@ -867,61 +867,12 @@ SK_ImGui_ControlPanelTitle (void)
 void
 SK_ImGui_AdjustCursor (void)
 {
-#if 0
-  static SK_AutoHandle hAdjustEvent (
-    SK_CreateEvent (nullptr, TRUE, FALSE, nullptr)
-  );
-
-  SetEvent (hAdjustEvent.m_h);
-
-  static HANDLE
-    hThread = SK_Thread_CreateEx (
-    [](LPVOID pUser)-> DWORD
-    {
-      HANDLE hSignals [] = {
-        __SK_DLL_TeardownEvent,
-             (HANDLE)pUser
-      };
-
-      DWORD dwWaitStatus =
-              WAIT_ABANDONED;
-
-      while (dwWaitStatus != WAIT_OBJECT_0)
-      {
-        dwWaitStatus =
-          WaitForMultipleObjects ( 2, hSignals, FALSE, INFINITE );
-
-        if (dwWaitStatus == (WAIT_OBJECT_0 + 1))
-        {
-          ResetEvent (hSignals [1]);
-
-          //SK_ClipCursor (nullptr);
-          //   SK_AdjustWindow   ();       // Restore game's clip cursor behavior
-
-          SK_Window_RepositionIfNeeded ();
-
-          //extern void SK_AdjustClipRect (void);
-          //            SK_AdjustClipRect ();
-        }
-      };
-
-      hAdjustEvent.Close ();
-
-      SK_Thread_CloseSelf ();
-
-      return 0;
-    },
-    L"[SK] Cursor Adjustment Thread",
-    (LPVOID)hAdjustEvent.m_h
-  );
-#else
   // This really doesn't need to be done in a second thread, it's already
   //   got a thread that waits for signaled work.
   SK_Window_RepositionIfNeeded ();
 
   // The logic used to be different, but now RepositionIfNeeded also handles
   //   any necessary changes to the cursor clipping rectangle.
-#endif
 }
 
 bool reset_frame_history = true;
@@ -2221,9 +2172,11 @@ SK_Display_ResolutionSelectUI (bool bMarkDirty)
       {
         // Trigger the game to resize the SwapChain so we can change its aspect ratio
         //
+        if (config.compatibility.allow_fake_size)
         PostMessage ( game_window.hWnd,                 WM_SIZE,        SIZE_RESTORED,
           MAKELPARAM (config.window.res.override.x, config.window.res.override.y)
                     );
+        if (config.compatibility.allow_fake_displaychange)
         PostMessage ( game_window.hWnd,                 WM_DISPLAYCHANGE, 32,
           MAKELPARAM (config.window.res.override.x, config.window.res.override.y)
                     );
@@ -2347,11 +2300,13 @@ DisplayModeMenu (bool windowed)
 
         // Trigger the game to resize the SwapChain so we can change its format and colorspace
         //
+        if (config.compatibility.allow_fake_size)
         PostMessage ( game_window.hWnd,                 WM_SIZE,        SIZE_RESTORED,
           MAKELPARAM (game_window.actual.client.right -
                       game_window.actual.client.left,   game_window.actual.client.bottom -
                                                         game_window.actual.client.top )
                     );
+        if (config.compatibility.allow_fake_displaychange)
         PostMessage ( game_window.hWnd,                 WM_DISPLAYCHANGE, 32,
           MAKELPARAM (game_window.actual.client.right -
                       game_window.actual.client.left,   game_window.actual.client.bottom -
@@ -7292,7 +7247,7 @@ LRESULT
 CALLBACK
 SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
 {
-  if (code < 0 || (! SK_IsGameWindowActive ())) // We saw nothing (!!)
+  if (code < 0 || GImGui == nullptr || GImGui->CurrentWindow == nullptr) // We saw nothing (!!)
     return CallNextHookEx (0, code, wParam, lParam);
 
   auto& io =
@@ -7330,12 +7285,12 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDBLCLK:
       if (! bPassthrough)
       {
-        io.MouseDown [0] = true;
+        io.AddMouseButtonEvent (ImGuiKey_MouseLeft, true);
 
         // Only capture mouse clicks when the window is in the foreground, failure to let
         //   left-clicks passthrough would prevent activating the game window.
-        if ( SK_ImGui_WantMouseCapture () && game_window.active &&
-                SK_GetForegroundWindow () == game_window.hWnd )
+        if ( game_window.active && SK_ImGui_WantMouseButtonCapture () &&
+             game_window.hWnd   == SK_GetForegroundWindow          () )
           return 1;
       }
       break;
@@ -7343,7 +7298,9 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONUP:
       if (! bPassthrough)
       {
-        if (SK_ImGui_WantMouseCapture ())
+        //io.AddMouseButtonEvent (ImGuiKey_MouseLeft, false);
+
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       }
       break;
@@ -7352,9 +7309,9 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
     case WM_RBUTTONDBLCLK:
       if (! bPassthrough)
       {
-        io.MouseDown [1] = true;
+        io.AddMouseButtonEvent (ImGuiKey_MouseRight, true);
 
-        if (SK_ImGui_WantMouseCapture ())
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       }
       break;
@@ -7362,7 +7319,9 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
     case WM_RBUTTONUP:
       if (! bPassthrough)
       {
-        if (SK_ImGui_WantMouseCapture ())
+        //io.AddMouseButtonEvent (ImGuiKey_MouseRight, false);
+
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       }
       break;
@@ -7371,9 +7330,9 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
     case WM_MBUTTONDBLCLK:
       if (! bPassthrough)
       {
-        io.MouseDown [2] = true;
+        io.AddMouseButtonEvent (ImGuiKey_MouseMiddle, true);
 
-        if (SK_ImGui_WantMouseCapture ())
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       }
       break;
@@ -7381,7 +7340,9 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
     case WM_MBUTTONUP:
       if (! bPassthrough)
       {
-        if (SK_ImGui_WantMouseCapture ())
+        //io.AddMouseButtonEvent (ImGuiKey_MouseMiddle, false);
+
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       }
       break;
@@ -7393,17 +7354,27 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
         MOUSEHOOKSTRUCTEX* mhsx =
        (MOUSEHOOKSTRUCTEX*)lParam;
 
-        io.MouseDown [3] |= ((HIWORD (mhsx->mouseData)) == XBUTTON1);
-        io.MouseDown [4] |= ((HIWORD (mhsx->mouseData)) == XBUTTON2);
+        if (((HIWORD (mhsx->mouseData)) == XBUTTON1))
+          io.AddMouseButtonEvent (ImGuiKey_MouseX1, true);
+        if (((HIWORD (mhsx->mouseData)) == XBUTTON2))
+          io.AddMouseButtonEvent (ImGuiKey_MouseX2, true);
 
-        if (SK_ImGui_WantMouseCapture ())
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       } break;
 
     case WM_XBUTTONUP:
       if (! bPassthrough)
       {
-        if (SK_ImGui_WantMouseCapture ())
+       // MOUSEHOOKSTRUCTEX* mhsx =
+       //(MOUSEHOOKSTRUCTEX*)lParam;
+
+        //if (((HIWORD (mhsx->mouseData)) == XBUTTON1))
+        //  io.AddMouseButtonEvent (ImGuiKey_MouseX1, false);
+        //if (((HIWORD (mhsx->mouseData)) == XBUTTON2))
+        //  io.AddMouseButtonEvent (ImGuiKey_MouseX2, false);
+
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       } break;
 
@@ -7416,18 +7387,18 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
 
         if (wParam == WM_MOUSEWHEEL)
         {
-          io.MouseWheel +=
+          io.AddMouseWheelEvent (0.0f,
             (float)GET_WHEEL_DELTA_WPARAM (mhsx->mouseData) /
-                (float)WHEEL_DELTA;
+                (float)WHEEL_DELTA);
         }
 
         else {
-          io.MouseWheelH +=
+          io.AddMouseWheelEvent (
             (float)GET_WHEEL_DELTA_WPARAM (mhsx->mouseData) /
-                (float)WHEEL_DELTA;
+                  (float)WHEEL_DELTA, 0.0f);
         }
 
-        if (SK_ImGui_WantMouseCapture ())
+        if (SK_ImGui_WantMouseButtonCapture ())
           return 1;
       } break;
 
@@ -7439,14 +7410,20 @@ SK_ImGui_MouseProc (int code, WPARAM wParam, LPARAM lParam)
         {
           // Install a mouse tracker to get WM_MOUSELEAVE
           if (! (game_window.mouse.tracking && game_window.mouse.inside))
-            SK_ImGui_UpdateMouseTracker ();
+          {
+            if (wParam != WM_NCMOUSEMOVE)
+            {
+              SK_ImGui_UpdateMouseTracker ();
+            }
+          }
 
           // Returning 1 here breaks WM_SETCURSOR behavior;
           //
           //   Hopefully we have a subclassed window / window proc hook and
           //     can remove mouse motion that way, because returning 1 is
           //       not an option.
-          return 0;
+          if (wParam != WM_NCMOUSEMOVE)
+            return 0;
         }
       }
 
@@ -8855,8 +8832,6 @@ SK_ImGui_Toggle (void)
     {
       SK_ImGui_Cursor.last_move = current_time;
 
-      //SK_ImGui_Cursor.showImGuiCursor ();
-
       if (SK::ControlPanel::Platform::WarnIfUnsupported ())
         config.imgui.show_eula = true;
       else
@@ -8884,75 +8859,78 @@ SK_ImGui_Toggle (void)
   if (SK::SteamAPI::AppID () != 0 && SK_ImGui_Visible)
       SK::SteamAPI::UpdateNumPlayers ();
 
-  static SK_AutoHandle hMoveCursor (
-    SK_CreateEvent (nullptr, FALSE, FALSE, nullptr)
-  );
+  if (config.input.ui.center_cursor)
+  {
+    static SK_AutoHandle hMoveCursor (
+      SK_CreateEvent (nullptr, FALSE, FALSE, nullptr)
+    );
 
-  SK_RunOnce (
-    SK_Thread_CreateEx ([](LPVOID) -> DWORD
-    {
-      SK_Thread_SetCurrentPriority (THREAD_PRIORITY_IDLE);
-
-      HANDLE hEvents [] = {
-        __SK_DLL_TeardownEvent,
-        hMoveCursor.m_h
-      };
-
-      while (true)
+    SK_RunOnce (
+      SK_Thread_CreateEx ([](LPVOID) -> DWORD
       {
-        DWORD dwWait =
-          WaitForMultipleObjectsEx (2, hEvents, FALSE, INFINITE, FALSE);
+        SK_Thread_SetCurrentPriority (THREAD_PRIORITY_IDLE);
 
-        if (dwWait == WAIT_OBJECT_0)
-          break;
+        HANDLE hEvents [] = {
+          __SK_DLL_TeardownEvent,
+          hMoveCursor.m_h
+        };
 
-        // Stupid hack to make sure the mouse cursor swaps between SK's and
-        //   the game's in response to opening/closing the control panel
-        if (dwWait == WAIT_OBJECT_0 + 1)
+        while (true)
         {
-          auto frames_drawn =
-            SK_GetFramesDrawn ();
+          DWORD dwWait =
+            WaitForMultipleObjectsEx (2, hEvents, FALSE, INFINITE, FALSE);
 
-          while (frames_drawn > SK_GetFramesDrawn () - 2)
-            SwitchToThread ();
+          if (dwWait == WAIT_OBJECT_0)
+            break;
 
-          POINT                 ptCursor;
-          if (SK_GetCursorPos (&ptCursor) && SK_GetForegroundWindow () == game_window.hWnd)
+          // Stupid hack to make sure the mouse cursor swaps between SK's and
+          //   the game's in response to opening/closing the control panel
+          if (dwWait == WAIT_OBJECT_0 + 1)
           {
-            GetWindowRect (game_window.hWnd,
-                          &game_window.actual.window);
-            if (PtInRect (&game_window.actual.window, ptCursor))
+            auto frames_drawn =
+              SK_GetFramesDrawn ();
+
+            while (frames_drawn > SK_GetFramesDrawn () - 2)
+              SwitchToThread ();
+
+            POINT                 ptCursor;
+            if (SK_GetCursorPos (&ptCursor) && SK_GetForegroundWindow () == game_window.hWnd)
             {
-              SK_SetCursorPos   (ptCursor.x + 1, ptCursor.y - 1);
-              Send_WM_SETCURSOR ();
+              GetWindowRect (game_window.hWnd,
+                            &game_window.actual.window);
+              if (PtInRect (&game_window.actual.window, ptCursor))
+              {
+                SK_SetCursorPos   (ptCursor.x + 1, ptCursor.y - 1);
+                Send_WM_SETCURSOR ();
 
-              frames_drawn =
-                SK_GetFramesDrawn ();
+                frames_drawn =
+                  SK_GetFramesDrawn ();
 
-              while (frames_drawn > SK_GetFramesDrawn () - 2)
-                SwitchToThread ();
+                while (frames_drawn > SK_GetFramesDrawn () - 2)
+                  SwitchToThread ();
 
-              SK_GetCursorPos   (&ptCursor);
-              SK_SetCursorPos   ( ptCursor.x - 1, ptCursor.y + 1);
-              Send_WM_SETCURSOR (         );
+                SK_GetCursorPos   (&ptCursor);
+                SK_SetCursorPos   ( ptCursor.x - 1, ptCursor.y + 1);
+                Send_WM_SETCURSOR (         );
+              }
             }
           }
         }
-      }
 
-      SK_Thread_CloseSelf ();
+        SK_Thread_CloseSelf ();
 
-      return 0;
-    }, L"[SK] Rodeo Mouse Wrangler");
-  );
+        return 0;
+      }, L"[SK] Rodeo Mouse Wrangler");
+    );
+
+    // Move the cursor a couple of times to change the loaded image
+    if (SK_ImGui_WantHWCursor ())
+      SetEvent (hMoveCursor);
+  }
 
   // Save config on control panel close, not open
   if (! SK_ImGui_Visible)
     config.utility.save_async ();
-
-  // Move the cursor a couple of times to change the loaded image
-  if (SK_ImGui_WantHWCursor ())
-    SetEvent (hMoveCursor);
 
 
   // Immediately stop capturing keyboard/mouse events,

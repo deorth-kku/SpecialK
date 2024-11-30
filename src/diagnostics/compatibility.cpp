@@ -1196,16 +1196,21 @@ SK_slGetNativeInterface (void *proxyInterface, void **baseInterface)
   if (FAILED (pUnk->QueryInterface (__uuidof (IStreamlineBaseInterface), baseInterface)))
     return sl::Result::eErrorUnsupportedInterface;
 #else
-  slGetNativeInterface_pfn
-  slGetNativeInterface =
- (slGetNativeInterface_pfn)SK_GetProcAddress (L"sl.interposer.dll",
- "slGetNativeInterface");
+  sl::Result result;
 
-  if (slGetNativeInterface != nullptr)
-    return slGetNativeInterface (proxyInterface, baseInterface);
+  static
+      slGetNativeInterface_pfn
+      slGetNativeInterface  = nullptr;
+  if (slGetNativeInterface == nullptr && SK_GetFramesDrawn () < 240)
+      slGetNativeInterface =
+     (slGetNativeInterface_pfn)SK_GetProcAddress (L"sl.interposer.dll",
+     "slGetNativeInterface"); result =
+      slGetNativeInterface != nullptr                      ?
+      slGetNativeInterface (proxyInterface, baseInterface) :
+                          sl::Result::eErrorNotInitialized ;
+
+  return result;
 #endif
-
-  return sl::Result::eErrorNotInitialized;
 }
 
 sl::Result
@@ -1259,14 +1264,19 @@ SK_slUpgradeInterface (void **baseInterface)
     return result;
   }
 #else
-  slUpgradeInterface_pfn
-  slUpgradeInterface =
- (slUpgradeInterface_pfn)SK_GetProcAddress (L"sl.interposer.dll",
- "slUpgradeInterface");
+  sl::Result result;
 
-  if (slUpgradeInterface != nullptr)
-    return slUpgradeInterface (baseInterface);
+  static
+      slUpgradeInterface_pfn
+      slUpgradeInterface  = nullptr;
+  if (slUpgradeInterface == nullptr && SK_GetFramesDrawn () < 240)
+      slUpgradeInterface =
+     (slUpgradeInterface_pfn)SK_GetProcAddress (L"sl.interposer.dll",
+     "slUpgradeInterface"); result =
+      slUpgradeInterface != nullptr      ?
+      slUpgradeInterface (baseInterface) :
+        sl::Result::eErrorNotInitialized ;
+
+  return result;
 #endif
-
-  return sl::Result::eErrorNotInitialized;
 }
