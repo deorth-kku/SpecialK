@@ -1263,7 +1263,7 @@ SK_HatsuneMiku_BeginFrame (void)
 {
   // Skip a few frames before doing the pointer scan
   //
-  if (SK_GetFramesDrawn () < 333)
+  if (SK_GetFramesDrawn () < 39)
     return;
 
   // 1.00: 0x14B2A78
